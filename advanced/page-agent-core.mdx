@@ -1,0 +1,269 @@
+---
+title: "PageAgentCore: Headless Agent Without Built-in UI"
+sidebarTitle: "PageAgentCore"
+description: "Use PageAgentCore from @page-agent/core to run the agent engine headless, wire up a custom UI, or embed Page Agent inside another agent system."
+---
+
+`PageAgentCore` is the core agent class exported from `@page-agent/core`. It contains the full ReAct agent loop — observe, think, act — but ships with **no built-in UI panel**. `PageAgent` (the top-level package) is simply a thin subclass that wires `PageAgentCore` together with `PageController` and the default floating `Panel`. When you need a different interface, a headless test harness, or integration inside a larger agent system, reach for `PageAgentCore` directly.
+
+## When to Use PageAgentCore
+
+<CardGroup cols={2}>
+  <Card title="Custom UI" icon="paintbrush">
+    Replace the built-in Panel with your own chat widget, sidebar, or command palette.
+  </Card>
+  <Card title="Headless Automation" icon="terminal">
+    Run the agent without any visual overlay during automated testing or CI pipelines.
+  </Card>
+  <Card title="Non-Browser Environments" icon="server">
+    Provide a custom `PageController` implementation (e.g., Puppeteer or Playwright) for server-side or desktop automation.
+  </Card>
+  <Card title="Agent Composition" icon="puzzle-piece">
+    Embed Page Agent as a sub-agent inside a larger orchestration system where the parent manages the UI.
+  </Card>
+</CardGroup>
+
+## Basic Usage
+
+```typescript
+import { PageAgentCore } from '@page-agent/core'
+import { PageController } from '@page-agent/page-controller'
+
+const agent = new PageAgentCore({
+  pageController: new PageController({ enableMask: true }),
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: 'your-api-key',
+  model: 'gpt-5.2',
+})
+
+// Listen to events for UI display
+agent.addEventListener('statuschange', () => {
+  console.log('Status:', agent.status)
+})
+
+agent.addEventListener('activity', (e) => {
+  const activity = (e as CustomEvent).detail
+  console.log('Activity:', activity.type)
+})
+
+// Execute task
+const result = await agent.execute('Fill in the form with test data')
+console.log(result.success, result.data)
+```
+
+---
+
+## Configuration Reference
+
+`PageAgentCoreConfig` is defined as `AgentConfig & { pageController: PageController }`.
+
+### PageController
+
+<ParamField path="pageController" type="PageController" required>
+  A [`PageController`](/advanced/page-controller) instance responsible for DOM extraction and element interaction. Create one with `new PageController({ enableMask: true })`.
+</ParamField>
+
+### LLM Config
+
+<ParamField path="baseURL" type="string" required>
+  Base URL of the LLM API endpoint (e.g., `https://api.openai.com/v1`).
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  Model name to use (e.g., `gpt-5.2`, `anthropic/claude-4.5-haiku`).
+</ParamField>
+
+<ParamField path="apiKey" type="string">
+  LLM API key. For production use, proxy the key through a backend instead of exposing it in client-side code.
+</ParamField>
+
+<ParamField path="maxRetries" type="number" default="3">
+  Maximum number of retry attempts when an LLM API call fails.
+</ParamField>
+
+<ParamField path="customFetch" type="typeof fetch">
+  Custom fetch function for injecting headers, credentials, or routing calls through a backend proxy. Use this to keep `apiKey` off the client.
+</ParamField>
+
+<ParamField path="disableNamedToolChoice" type="boolean" default="false">
+  When `true`, the agent always sends `tool_choice: "required"` instead of naming a specific tool. Useful for LLM providers that do not support the object form of `tool_choice`.
+</ParamField>
+
+<ParamField path="transformRequestBody" type="(requestBody) => Record<string, unknown> | undefined">
+  Transform the final request body before it is sent to the LLM. Useful for adding provider-specific cache hints or private request parameters.
+</ParamField>
+
+### Agent Config
+
+<ParamField path="language" type="'en-US' | 'zh-CN'" default="'en-US'">
+  Language for agent output and panel UI strings.
+</ParamField>
+
+<ParamField path="maxSteps" type="number" default="40">
+  Maximum number of agent steps allowed per task. The agent emits a warning at 5 steps remaining and halts at this limit.
+</ParamField>
+
+<ParamField path="stepDelay" type="number" default="0.4">
+  Seconds to wait between consecutive steps. Useful for rate-limited APIs or to allow the page to settle.
+</ParamField>
+
+<ParamField path="customTools" type="Record<string, PageAgentTool | null>">
+  Extend or override the built-in tool set. Set a key to `null` to remove that tool entirely.
+
+  ```typescript
+  import { z } from 'zod/v4'
+  import { tool } from 'page-agent'
+
+  const agent = new PageAgentCore({
+    // ...
+    customTools: {
+      ask_user: null, // disable the ask_user tool
+      my_tool: tool({
+        description: 'Do something custom',
+        inputSchema: z.object({ value: z.string() }),
+        execute: async function (input) {
+          return `Done: ${input.value}`
+        },
+      }),
+    },
+  })
+  ```
+</ParamField>
+
+<ParamField path="instructions" type="InstructionsConfig">
+  Instructions that guide agent behavior. See the [InstructionsConfig](#instructionsconfig) type below.
+</ParamField>
+
+<ParamField path="transformPageContent" type="(content: string) => string | Promise<string>">
+  Transform the simplified page HTML before it is sent to the LLM. Use this to mask sensitive data (e.g., phone numbers, credit card numbers) before they leave the browser.
+</ParamField>
+
+<ParamField path="customSystemPrompt" type="string">
+  Completely replace the default system prompt. Use with caution — an incorrect prompt can break agent reasoning entirely.
+</ParamField>
+
+<ParamField path="experimentalScriptExecutionTool" type="boolean" default="false">
+  Enable the `execute_javascript` tool, which lets the agent run arbitrary JS on the page. Can cause unpredictable side effects and may bypass data-masking. Only enable when necessary.
+</ParamField>
+
+<ParamField path="experimentalLlmsTxt" type="boolean" default="false">
+  Fetch `/llms.txt` from the current site origin and include it as additional context in every step prompt.
+</ParamField>
+
+### Lifecycle Hooks
+
+<Warning>
+  Lifecycle hooks are highly experimental and their signatures may change in future releases. Errors thrown from hooks propagate out of `execute()` as external errors. Catch exceptions inside the hook itself if the task should not be interrupted.
+</Warning>
+
+<ParamField path="onBeforeTask" type="(agent: PageAgentCore) => void | Promise<void>">
+  Called once before the agent starts the task loop.
+</ParamField>
+
+<ParamField path="onAfterTask" type="(agent: PageAgentCore, result: ExecutionResult) => void | Promise<void>">
+  Called once after the task completes (success or failure).
+</ParamField>
+
+<ParamField path="onBeforeStep" type="(agent: PageAgentCore, stepCount: number) => void | Promise<void>">
+  Called before each individual step. `stepCount` is 0-indexed.
+</ParamField>
+
+<ParamField path="onAfterStep" type="(agent: PageAgentCore, history: HistoricalEvent[]) => void | Promise<void>">
+  Called after each individual step with the current history snapshot.
+</ParamField>
+
+<ParamField path="onDispose" type="(agent: PageAgentCore, reason?: string) => void">
+  Called synchronously when `dispose()` is invoked.
+</ParamField>
+
+---
+
+## Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `status` | `'idle' \| 'running' \| 'completed' \| 'error' \| 'stopped'` | Current agent execution status. |
+| `history` | `HistoricalEvent[]` | Persistent history array that forms the agent's multi-step memory. |
+| `task` | `string` | The task string passed to the current (or most recent) `execute()` call. |
+| `lastResult` | `ExecutionResult \| null` | Result of the most recent run, or `null` before the first run completes. |
+| `disposed` | `boolean` | `true` after `dispose()` has been called. |
+| `id` | `string` | Unique identifier for this agent instance. |
+| `config` | `PageAgentCoreConfig` | The resolved configuration object. |
+| `tools` | `Map<string, PageAgentTool>` | Live map of available tools (may be modified by `customTools`). |
+| `pageController` | `PageController` | The bound `PageController` instance. |
+| `onAskUser` | `(question: string, options?: { signal: AbortSignal }) => Promise<string>` | Assign this callback to enable the `ask_user` tool. The promise should reject when `options.signal` aborts. |
+
+---
+
+## Methods
+
+| Method | Returns | Description |
+|---|---|---|
+| `execute(task)` | `Promise<ExecutionResult>` | Start a task. Throws if a task is already running — concurrent execution is not supported. |
+| `stop()` | `Promise<void>` | Gracefully stop the running task and wait for the loop to settle. The agent remains reusable afterwards. |
+| `dispose()` | `void` | Permanently destroy the agent and clean up all resources including the `PageController`. |
+| `pushObservation(content)` | `void` | Inject an observation string into history before the next step. Useful for testing or external monitoring hooks. |
+
+---
+
+## Events
+
+`PageAgentCore` extends `EventTarget`. All standard `addEventListener` / `removeEventListener` patterns apply.
+
+| Event | Type | Description |
+|---|---|---|
+| `statuschange` | `Event` | Fired on every status transition: `idle → running → completed / error / stopped`. Read `agent.status` inside the handler. |
+| `historychange` | `Event` | Fired when `agent.history` is updated. Read the full array from `agent.history`. |
+| `activity` | `CustomEvent<AgentActivity>` | Transient real-time feedback for UI components (thinking, executing, executed, retrying, error). Not persisted in history. |
+| `dispose` | `Event` | Fired when `dispose()` is called. Use this to clean up UI components. |
+
+---
+
+## Type Definitions
+
+### ExecutionResult
+
+```typescript
+interface ExecutionResult {
+  success: boolean
+  data: string
+  history: HistoricalEvent[]
+}
+```
+
+### AgentActivity
+
+```typescript
+type AgentActivity =
+  | { type: 'thinking' }
+  | { type: 'executing'; tool: string; input: unknown }
+  | { type: 'executed'; tool: string; input: unknown; output: string; duration: number }
+  | { type: 'retrying'; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string }
+```
+
+### InstructionsConfig
+
+```typescript
+interface InstructionsConfig {
+  /** Global system-level instructions applied to every task */
+  system?: string
+
+  /**
+   * Dynamic per-page instructions callback.
+   * Called before each step; return undefined to skip.
+   */
+  getPageInstructions?: (url: string) => string | undefined | null
+}
+```
+
+### HistoricalEvent
+
+```typescript
+type HistoricalEvent =
+  | { type: 'step'; stepIndex: number; reflection: Partial<AgentReflection>; action: { name: string; input: any; output: string } }
+  | { type: 'observation'; content: string }
+  | { type: 'user_takeover' }
+  | { type: 'retry'; message: string; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string }
+```

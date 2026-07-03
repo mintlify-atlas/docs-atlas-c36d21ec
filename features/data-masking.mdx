@@ -1,0 +1,119 @@
+---
+title: "Mask Sensitive Data Before It Reaches the LLM"
+sidebarTitle: "Data Masking"
+description: "Use the transformPageContent hook to redact PII, financial data, and other sensitive information from page content before it is sent to the LLM."
+---
+
+Page Agent extracts a simplified representation of the DOM before every LLM invocation. The `transformPageContent` hook intercepts that content string and lets you inspect, modify, or redact it before it leaves the browser. This is the primary mechanism for preventing personally identifiable information (PII), financial data, and other sensitive values from being transmitted to external LLM APIs.
+
+## API Definition
+
+```typescript
+interface PageAgentConfig {
+  /**
+   * Transform page content before sending to LLM.
+   * Called after DOM extraction and simplification, before LLM invocation.
+   */
+  transformPageContent?: (content: string) => Promise<string> | string
+}
+```
+
+The hook receives the simplified page content as a plain string and must return the (optionally modified) string — either synchronously or as a `Promise<string>`. It is called on every step before the LLM sees the page.
+
+## Common Masking Patterns
+
+The following example masks phone numbers, email addresses, national ID card numbers, and bank card numbers using regular expressions:
+
+```typescript
+const agent = new PageAgent({
+  transformPageContent: async (content) => {
+    // China phone number (11 digits starting with 1[3-9])
+    content = content.replace(/\b(1[3-9]\d)(\d{4})(\d{4})\b/g, '$1****$3')
+
+    // Email address
+    content = content.replace(
+      /\b([a-zA-Z0-9._%+-])[^@]*(@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/g,
+      '$1***$2'
+    )
+
+    // China ID card number (18 digits)
+    content = content.replace(
+      /\b(\d{6})(19|20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(\d{3}[\dXx])\b/g,
+      '$1********$5'
+    )
+
+    // Bank card number (16–19 digits)
+    content = content.replace(/\b(\d{4})\d{8,11}(\d{4})\b/g, '$1********$2')
+
+    return content
+  },
+})
+```
+
+## Masking Financial Data
+
+For applications displaying credit card numbers, account balances, or transaction IDs, target the specific patterns present in your UI:
+
+```typescript
+const agent = new PageAgent({
+  transformPageContent: (content) => {
+    // Credit card (groups of 4 digits separated by spaces or dashes)
+    content = content.replace(
+      /\b(\d{4})[\s-](\d{4})[\s-](\d{4})[\s-](\d{4})\b/g,
+      '$1 **** **** $4'
+    )
+
+    // Bank account numbers (10–18 digits)
+    content = content.replace(/\b(\d{4})\d{6,14}(\d{4})\b/g, '$1**...**$2')
+
+    return content
+  },
+})
+```
+
+## Advanced: External Redaction Service
+
+Because `transformPageContent` supports `async` functions, you can call an external redaction service or a local NLP model for more sophisticated PII detection:
+
+```typescript
+const agent = new PageAgent({
+  transformPageContent: async (content) => {
+    const response = await fetch('/api/redact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: content }),
+    })
+    const { redacted } = await response.json()
+    return redacted
+  },
+})
+```
+
+<Note>
+  Keep the redaction service fast. `transformPageContent` is called synchronously in the agent's step loop, so slow redaction adds latency to every LLM call. Consider caching results for unchanged page content.
+</Note>
+
+## Debugging: Inspect What the LLM Sees
+
+`transformPageContent` is also a convenient inspection point for debugging. Log the content before returning it to understand exactly what DOM information the model receives:
+
+```typescript
+const agent = new PageAgent({
+  transformPageContent: (content) => {
+    console.log('[page-agent] LLM page content:', content)
+    return content // return unchanged for inspection only
+  },
+})
+```
+
+<Tip>
+  Use this during development to verify that your masking patterns are working correctly and that no sensitive fields slip through.
+</Tip>
+
+## Limitations
+
+<Warning>
+  The `execute_javascript` built-in tool runs arbitrary JavaScript directly on the page and **can read DOM content before `transformPageContent` is applied**. If data masking is a security requirement, either:
+  - Do not enable `experimentalScriptExecutionTool: true`, or
+  - Remove the tool explicitly: `customTools: { execute_javascript: null }`
+</Warning>

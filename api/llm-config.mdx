@@ -1,0 +1,183 @@
+---
+title: "LLMConfig — LLM Connection Settings Reference"
+sidebarTitle: "LLMConfig"
+description: "All LLMConfig fields for connecting Page Agent to any OpenAI-compatible LLM: baseURL, model, apiKey, customFetch, transformRequestBody, and more."
+---
+
+`LLMConfig` defines every setting that controls how Page Agent communicates with the LLM backend. Page Agent works with any OpenAI-compatible API that supports tool calls — including OpenAI, Anthropic-compatible proxies, Alibaba Cloud Qwen, and local models served by Ollama or LM Studio. These fields are all inherited directly by `AgentConfig`, so you never need to pass a nested object.
+
+<Warning>
+  **Never embed real API keys in client-side code.** Browser JavaScript is publicly readable. Route LLM requests through a backend proxy and use `customFetch` to attach credentials server-side.
+</Warning>
+
+## Fields
+
+<ParamField path="baseURL" type="string" required>
+  The base URL of the OpenAI-compatible API endpoint. Do not include a trailing `/chat/completions` path — Page Agent appends the correct path automatically.
+
+  | Provider | Example value |
+  |---|---|
+  | OpenAI | `https://api.openai.com/v1` |
+  | Alibaba Cloud Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+  | Ollama (local) | `http://localhost:11434/v1` |
+  | LM Studio (local) | `http://localhost:1234/v1` |
+  | Custom proxy | `/api/llm-proxy` |
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The model identifier exactly as the provider expects it. For example `gpt-4.1-mini`, `qwen3.5-plus`, `claude-sonnet-5`, or `qwen3:14b` (Ollama tag format).
+</ParamField>
+
+<ParamField path="apiKey" type="string">
+  API key for the LLM provider. Omit for local runtimes (Ollama, LM Studio) that do not require authentication, or when authentication is handled via `customFetch`.
+</ParamField>
+
+<ParamField path="maxRetries" type="number" default="3">
+  Number of times the client will retry a failed LLM call before propagating the error. Applies to transient network errors and non-2xx responses.
+</ParamField>
+
+<ParamField path="disableNamedToolChoice" type="boolean">
+  When `true`, the `tool_choice` field is removed from every request body. Required for LM Studio and some other local models that reject named tool choice with an error similar to `"Invalid tool_choice type: 'object'"`.
+</ParamField>
+
+<ParamField path="transformRequestBody" type="(body: Record<string, unknown>) => Record<string, unknown> | undefined">
+  Intercept and transform the complete request body immediately before it is sent to the provider. Return a modified copy of `body`, or mutate the argument in place and return `undefined`. Use this for provider-specific flags that are not part of the standard OpenAI schema.
+
+  ```typescript
+  // Add Claude-style prompt-caching hints
+  transformRequestBody: (body) => ({
+    ...body,
+    cache_control: { type: 'ephemeral' },
+  })
+  ```
+</ParamField>
+
+<ParamField path="customFetch" type="typeof globalThis.fetch">
+  Replacement `fetch` implementation used for all LLM API requests. The response must follow the OpenAI API response format. Common use cases:
+
+  - Attach session cookies or bearer tokens without exposing them in source code
+  - Route requests through a backend proxy to keep the API key server-side
+  - Override CORS headers in a browser extension context
+
+  ```typescript
+  customFetch: (url, init) =>
+    fetch(url, { ...init, credentials: 'include' })
+  ```
+</ParamField>
+
+---
+
+## Provider Examples
+
+### OpenAI
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: 'https://api.openai.com/v1',
+  model: 'gpt-4.1-mini',
+  apiKey: 'sk-...',
+})
+```
+
+### Alibaba Cloud Qwen
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  model: 'qwen3.5-plus',
+  apiKey: 'sk-...',
+})
+```
+
+### Local Ollama
+
+No API key is needed. The model name must match an Ollama tag you have already pulled.
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: 'http://localhost:11434/v1',
+  model: 'qwen3:14b',
+})
+```
+
+<Tip>
+  If you see `"Invalid tool_choice type: 'object'"` with a local model, add `disableNamedToolChoice: true` to your config.
+</Tip>
+
+### Backend Proxy with Cookie Auth
+
+Route all LLM traffic through your own server so the API key is never exposed to the browser.
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: '/api/llm-proxy',
+  model: 'gpt-4.1',
+  customFetch: (url, init) =>
+    fetch(url, { ...init, credentials: 'include' }),
+})
+```
+
+### Claude Prompt Caching via Proxy
+
+Use `transformRequestBody` to attach caching hints supported by your proxy or provider.
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: 'https://your-claude-proxy/v1',
+  model: 'claude-sonnet-5',
+  transformRequestBody: (body) => ({
+    ...body,
+    cache_control: { type: 'ephemeral' },
+  }),
+})
+```
+
+---
+
+## Full TypeScript Interface
+
+```typescript
+export interface LLMConfig {
+  /** Base URL of the OpenAI-compatible API (required) */
+  baseURL: string
+
+  /** Model identifier as accepted by the provider (required) */
+  model: string
+
+  /** API key; omit for local runtimes or when using customFetch */
+  apiKey?: string
+
+  /** Retry count on LLM call failure. Default: 3 */
+  maxRetries?: number
+
+  /**
+   * Remove tool_choice from the request body.
+   * Fix for LM Studio and some local models.
+   */
+  disableNamedToolChoice?: boolean
+
+  /**
+   * Transform the final request body before sending.
+   * Return a new object or mutate and return undefined.
+   */
+  transformRequestBody?: (
+    requestBody: Record<string, unknown>
+  ) => Record<string, unknown> | undefined
+
+  /**
+   * Custom fetch for auth, proxying, or CORS overrides.
+   * Response must follow OpenAI API format.
+   */
+  customFetch?: typeof globalThis.fetch
+}
+```

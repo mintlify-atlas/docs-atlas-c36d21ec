@@ -1,0 +1,249 @@
+---
+title: "Troubleshoot Common Page Agent Issues"
+sidebarTitle: "Troubleshooting"
+description: "Step-by-step fixes for the most frequent Page Agent problems: unresponsive agents, tool call errors, CORS failures, infinite loops, and more."
+---
+
+Most Page Agent problems fall into a small set of categories: LLM misconfiguration, model capability gaps, CORS policy violations, or the agent getting stuck waiting for a page that never settles. Work through the relevant accordion below to diagnose and fix your issue quickly.
+
+## Common Issues
+
+<AccordionGroup>
+
+<Accordion title="The agent is not responding / no action taken">
+
+**Symptom:** You call `agent.execute(...)`, the status becomes `running`, but nothing happens on the page and no errors appear.
+
+**Diagnosis steps:**
+
+1. **Check the browser Network tab** — Open DevTools → Network and look for requests to your `baseURL`. If there are none, the `PageAgent` instance may not have been created (check the console for constructor errors).
+
+2. **Look for failed LLM API calls** — Filter by XHR/Fetch. A `401 Unauthorized` means your `apiKey` is wrong or missing. A `404` usually means `baseURL` is incorrect. A `400 Bad Request` suggests a model name mismatch — see the [Tool Call Format Errors](#tool-call-format-errors) section below.
+
+3. **Confirm the model supports tool/function calling** — Page Agent relies entirely on structured tool calls. Models that only produce plain text completions (e.g. some instruction-tuned variants) will not work. Check the [tested models list](https://alibaba.github.io/page-agent/docs/features/models).
+
+4. **Test with a simpler task** — Give the agent a minimal, unambiguous instruction like `"Click the first button on the page"`. If that works, the problem is in task complexity rather than configuration.
+
+<Tip>
+  Check `agent.history` in the console after a failed run — it often contains LLM error messages and retry events that pinpoint the exact failure.
+</Tip>
+
+</Accordion>
+
+<Accordion title="Tool call format errors">
+
+**Symptom:** The agent returns malformed tool calls, plain text, or unexpected JSON instead of structured actions. You may see retry events in `agent.history` with messages like `"invalid tool call"`.
+
+**Why it happens:** Not every model that advertises tool-calling support handles Page Agent's nested union schema correctly. The agent includes built-in auto-recovery (it retries with a corrective prompt), but weaker models may never converge.
+
+**Fixes:**
+
+1. **Switch to a stronger model** — Use a model from the [tested and recommended list](https://alibaba.github.io/page-agent/docs/features/models). Models like `qwen3.5-plus`, `gpt-4o`, or `claude-3.5-sonnet` handle Page Agent's tool schema reliably.
+
+2. **Check your proxy/gateway is forwarding `tools` intact** — If you're routing through an API gateway, confirm it passes the `tools` and `tool_choice` fields to the upstream provider without modification. Some gateways strip or rewrite these fields.
+
+3. **For LM Studio — set `disableNamedToolChoice: true`** — LM Studio does not support the `tool_choice: { type: "function", function: { name: "..." } }` format. Set this flag to fall back to `tool_choice: "required"`:
+
+   ```typescript
+   const agent = new PageAgent({
+     model: 'your-local-model',
+     baseURL: 'http://localhost:1234/v1',
+     apiKey: 'lm-studio',
+     disableNamedToolChoice: true,
+   })
+   ```
+
+</Accordion>
+
+<Accordion title="Step count exceeded">
+
+**Symptom:** The agent stops with `"Step count exceeded maximum limit"` and `result.success === false`.
+
+**Why it happens:** The default `maxSteps` is `40`. Complex multi-step tasks — especially those requiring many form interactions or navigation — can exceed this limit.
+
+**Fixes:**
+
+1. **Break the task into smaller sub-tasks** — Instead of one large `execute()` call, chain several focused instructions:
+
+   ```typescript
+   await agent.execute('Navigate to the Settings page')
+   await agent.execute('Change the notification email to user@example.com')
+   await agent.execute('Save the changes')
+   ```
+
+2. **Increase `maxSteps`** — If the task is inherently long and cannot be broken up:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     maxSteps: 80,
+   })
+   ```
+
+3. **Make instructions more specific** — Vague instructions cause the agent to explore rather than act. The more precise the task, the fewer steps it needs.
+
+<Note>
+  When only 5 steps remain, the agent automatically injects a warning into its context urging it to wrap up. At 2 steps remaining it becomes a hard instruction to finish immediately or call `done`.
+</Note>
+
+</Accordion>
+
+<Accordion title="CORS error when using a local LLM (Ollama / LM Studio)">
+
+**Symptom:** Browser console shows `CORS policy: No 'Access-Control-Allow-Origin' header` when Page Agent tries to reach a locally running model server.
+
+**Why it happens:** Browser security policy blocks cross-origin requests unless the server explicitly allows them. Local model servers default to same-origin only.
+
+**Fix for Ollama:**
+
+Set the `OLLAMA_ORIGINS` environment variable to permit requests from your page's origin (or `*` for development):
+
+```bash
+# Allow all origins (development only)
+OLLAMA_ORIGINS="*" ollama serve
+
+# Or allow a specific origin
+OLLAMA_ORIGINS="http://localhost:3000" ollama serve
+```
+
+**Fix for LM Studio:**
+
+In LM Studio, open **Settings → Server** and enable **"Allow Cross-Origin Requests (CORS)"**. Then restart the server.
+
+<Warning>
+  Setting `OLLAMA_ORIGINS="*"` allows any website to send requests to your local Ollama instance. Only do this in a controlled development environment, never on a shared or production machine.
+</Warning>
+
+</Accordion>
+
+<Accordion title="The agent loops or waits forever">
+
+**Symptom:** The agent keeps calling `wait` repeatedly, or cycles through the same actions without making progress. `agent.history` grows but the task never completes.
+
+**Common causes and fixes:**
+
+1. **Page hasn't settled after navigation** — If your app routes between views, the DOM may still be loading when the agent reads it. Increase `stepDelay` to give the page more time:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     stepDelay: 1.5, // seconds between steps (default: 0.4)
+   })
+   ```
+
+2. **Use `onAskUser` for ambiguous situations** — If the agent reaches a decision point it can't resolve from the DOM alone, it needs to ask. Set `onAskUser` so it can pause and get user input rather than spinning:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     onAskUser: async (question) => {
+       // Could be a custom modal, window.prompt, or a chat interface
+       return window.prompt(question) ?? ''
+     },
+   })
+   ```
+
+3. **The task is under-specified** — Add context via `instructions.system` to tell the agent about page-specific behaviour:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     instructions: {
+       system: 'After clicking Save, wait for the green success toast before proceeding.',
+     },
+   })
+   ```
+
+</Accordion>
+
+<Accordion title="disableNamedToolChoice needed for LM Studio">
+
+**Symptom:** When using LM Studio as the backend, the agent fails with API errors about unsupported `tool_choice` format, even though the model itself supports function calling.
+
+**Why it happens:** LM Studio does not support the named `tool_choice` format (`{ type: "function", function: { name: "AgentOutput" } }`) that Page Agent uses by default to force a specific tool selection. It only supports `"auto"` or `"required"`.
+
+**Fix:** Pass `disableNamedToolChoice: true` in the config. Page Agent will fall back to `tool_choice: "required"`, which LM Studio handles correctly:
+
+```typescript
+const agent = new PageAgent({
+  model: 'mistral-7b-instruct',
+  baseURL: 'http://localhost:1234/v1',
+  apiKey: 'lm-studio',
+  disableNamedToolChoice: true,
+})
+```
+
+<Note>
+  This option is also useful for other local model servers that advertise OpenAI compatibility but do not implement the named tool_choice extension.
+</Note>
+
+</Accordion>
+
+<Accordion title="Chrome Extension not connecting">
+
+**Symptom:** You have installed the Page Agent Chrome Extension (PageAgentExt) but the in-page agent cannot communicate with it. Multi-tab features are unavailable.
+
+**Diagnosis and fixes:**
+
+1. **Verify the extension is installed** — Open `chrome://extensions/` and confirm Page Agent Extension is present and enabled. If not, install it from the [Chrome Web Store](https://alibaba.github.io/page-agent/docs/features/chrome-extension).
+
+2. **Check the connection token in `localStorage`** — The extension and the page library use a shared token stored in `localStorage` to authenticate the connection. Open DevTools → Application → Local Storage and look for the `pageAgentToken` key. If it is missing or mismatched, clear it and reload the page to let the extension re-inject it.
+
+3. **Ensure you are on a supported page** — The extension cannot inject into `chrome://` pages, the Chrome Web Store, or pages with restrictive Content Security Policies that block extension scripts.
+
+4. **Check the extension's background service worker** — In `chrome://extensions/`, click "Service Worker" next to the Page Agent Extension. Any errors there may indicate the extension itself needs to be reloaded or reinstalled.
+
+</Accordion>
+
+<Accordion title="Agent operates on wrong elements">
+
+**Symptom:** The agent repeatedly interacts with the wrong button, input, or link — even after several retries. It cannot locate the correct target.
+
+**Why it happens:** Page Agent reads the page through a sanitised DOM snapshot. Elements that lack semantic markup (`aria-label`, `role`, accessible text) appear identical in the snapshot, making disambiguation hard.
+
+**Fixes:**
+
+1. **Use `instructions` to describe the target precisely** — Give the agent additional context about what to look for:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     instructions: {
+       system: 'The "Submit" button in the invoice form has the text "Send Invoice". The top navigation also has a button labelled "Submit" — ignore it.',
+     },
+   })
+   ```
+
+2. **Inject accessibility attributes** — Add `aria-label` or `data-testid` attributes to ambiguous elements via a script before the agent runs. Better semantic HTML directly improves the DOM snapshot quality.
+
+3. **Use `transformPageContent` to guide the snapshot** — Intercept the raw DOM string the agent sees and annotate or simplify it:
+
+   ```typescript
+   const agent = new PageAgent({
+     // ...
+     transformPageContent: (content) => {
+       // Example: annotate a specific element
+       return content.replace(
+         'id="invoice-submit"',
+         'id="invoice-submit" [THIS IS THE CORRECT SUBMIT BUTTON]'
+       )
+     },
+   })
+   ```
+
+4. **Build a custom Tool for persistent problem elements** — If a specific element is consistently difficult, write a `customTool` that targets it directly by ID or query selector, bypassing the LLM's element selection entirely.
+
+<Tip>
+  Good semantic HTML and ARIA attributes benefit both accessibility and Page Agent performance. If your page works well with a screen reader, it will generally work well with Page Agent too.
+</Tip>
+
+</Accordion>
+
+</AccordionGroup>
+
+## Still Stuck?
+
+If none of the above resolves your issue, open a [GitHub Issue](https://github.com/alibaba/page-agent/issues) and include:
+- The model name and `baseURL` you are using (redact the API key)
+- The relevant entries from `agent.history` (copy from the console)
+- The error message from the Network tab, if any

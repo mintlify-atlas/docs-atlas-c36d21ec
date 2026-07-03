@@ -1,0 +1,251 @@
+---
+title: "Supported LLM Models and Configuration"
+sidebarTitle: "Models"
+description: "Page Agent works with any OpenAI-compatible model that supports tool calls. Learn which models are tested, how to configure them, and how to enable prompt caching."
+---
+
+Page Agent supports any model that implements the OpenAI API specification and provides tool call support — including public cloud providers, local runtimes, and self-hosted proxies. The list below covers models that have been explicitly tested; any OpenAI-compatible endpoint that supports `tool_choice` should work.
+
+## Tested Models
+
+Models marked with ⭐ are the **recommended baseline** models: fast and lightweight with strong tool-call capabilities.
+
+<Tabs>
+  <Tab title="Qwen">
+    | Model | Baseline |
+    |---|---|
+    | `qwen3.7-max` | |
+    | `qwen3.7-plus` | |
+    | `qwen3.6-max` | |
+    | `qwen3.6-plus` | |
+    | `qwen3.6-flash` | |
+    | `qwen3.5-plus` | ⭐ |
+    | `qwen3.5-flash` | ⭐ |
+    | `qwen3-max` | |
+  </Tab>
+  <Tab title="OpenAI">
+    | Model | Baseline |
+    |---|---|
+    | `gpt-5.5` | |
+    | `gpt-5.4` | |
+    | `gpt-5.4-mini` | ⭐ |
+    | `gpt-5.4-nano` | ⭐ |
+    | `gpt-5.2` | |
+    | `gpt-5.1` | |
+    | `gpt-5` | |
+    | `gpt-5-mini` | |
+    | `gpt-4.1` | |
+    | `gpt-4.1-mini` | |
+  </Tab>
+  <Tab title="Anthropic">
+    | Model | Baseline |
+    |---|---|
+    | `claude-sonnet-5` | |
+    | `claude-fable-5` | |
+    | `claude-opus-4-8` | |
+    | `claude-opus-4-7` | |
+    | `claude-opus-4-6` | |
+    | `claude-opus-4-5` | |
+    | `claude-sonnet-4-5` | |
+    | `claude-haiku-4-5` | ⭐ |
+  </Tab>
+  <Tab title="Google">
+    | Model | Baseline |
+    |---|---|
+    | `gemini-3.5-flash` | ⭐ |
+    | `gemini-3.1-pro` | |
+    | `gemini-3.1-flash-lite` | |
+    | `gemini-2.5-pro` | |
+    | `gemini-2.5-flash` | |
+  </Tab>
+  <Tab title="DeepSeek">
+    | Model | Baseline |
+    |---|---|
+    | `deepseek-v4-pro` | |
+    | `deepseek-v4-flash` | ⭐ |
+    | `deepseek-3.2` | |
+  </Tab>
+  <Tab title="Others">
+    | Provider | Model | Baseline |
+    |---|---|---|
+    | xAI | `grok-4.3` | |
+    | xAI | `grok-build-0.1` | |
+    | MoonshotAI | `kimi-k2.7-code` | |
+    | MoonshotAI | `kimi-k2.6` | |
+    | MoonshotAI | `kimi-k2.5` | |
+    | Z.AI | `glm-5.2` | |
+    | Z.AI | `glm-5.1` | |
+    | Z.AI | `glm-5` | |
+    | Z.AI | `glm-4.7` | |
+    | MiniMax | `MiniMax-M2.7` | |
+    | MiniMax | `MiniMax-M2.5` | |
+  </Tab>
+</Tabs>
+
+## Model Selection Tips
+
+<Tip>
+  Prefer fast, lightweight models with strong tool-call (function-calling) capabilities. The ⭐ baseline models offer the best balance of speed, cost, and reliability for typical web automation tasks.
+</Tip>
+
+- **ToolCall quality matters most.** Models with weak tool-call support may return malformed responses. Page Agent has built-in error recovery for common format errors, but persistent failures will cause tasks to fail.
+- **Avoid very small models.** Models smaller than ~10B parameters typically cannot handle the complexity of Page Agent's tool definitions reliably.
+- **Context length is critical.** A typical rendered page requires 10–20k tokens of context. Ensure your model and plan support at least 16k tokens.
+
+## Basic Configuration
+
+```typescript
+// OpenAI-compatible services (e.g., Alibaba Bailian)
+const pageAgent = new PageAgent({
+  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  apiKey: 'your-api-key',
+  model: 'qwen3.5-plus'
+});
+```
+
+## Free Testing API
+
+A free testing endpoint is available for evaluating Page Agent without a paid API key.
+
+<Warning>
+  **For technical evaluation and R&D only.** Data is processed via servers in Mainland China (proxied via Alibaba Cloud FC to BaiLian Qwen models). Do not input any personally identifiable information (PII) or sensitive data. By using this endpoint you agree to the [Terms of Use](https://github.com/alibaba/page-agent/blob/main/docs/terms-and-privacy.md#2-testing-api-and-demo-disclaimer--terms-of-use). **Never use this endpoint in production.**
+</Warning>
+
+```bash
+# qwen3.5-plus / qwen3.5-flash
+LLM_BASE_URL="https://page-ag-testing-ohftxirgbn.cn-shanghai.fcapp.run"
+LLM_MODEL_NAME="qwen3.5-plus"
+```
+
+## Production Authentication
+
+If you are building a personal assistant, you can connect directly to your LLM provider. For web app integrations, set up a **backend proxy** so API keys are never exposed to the browser:
+
+```typescript
+const agent = new PageAgent({
+  baseURL: '/api/llm-proxy',
+  model: 'gpt-5.1',
+  customFetch: (url, init) =>
+    fetch(url, { ...init, credentials: 'include' }),
+});
+```
+
+<Warning>
+  **Never commit real LLM API keys to frontend code.** Use a backend proxy with cookie-based or token-based authentication for production deployments.
+</Warning>
+
+## Prompt Caching
+
+Some LLM providers support prompt caching, which can significantly reduce latency and cost for long system prompts. Because each provider exposes caching through different mechanisms, use the `transformRequestBody` hook to inject provider-specific cache hints.
+
+<Tabs>
+  <Tab title="Claude">
+    Claude supports global automatic prompt caching. When using a Claude-compatible proxy, add `cache_control` at the top level of the request body:
+
+    ```typescript
+    const pageAgent = new PageAgent({
+      baseURL: 'https://your-claude-proxy.example/v1',
+      apiKey: 'your-api-key',
+      model: 'claude-sonnet-5',
+      transformRequestBody: (requestBody) => ({
+        ...requestBody,
+        cache_control: { type: 'ephemeral' },
+      }),
+    });
+    ```
+  </Tab>
+  <Tab title="Qwen (Bailian)">
+    Alibaba Cloud Bailian Qwen supports message-level `cache_control`. Apply it to the system message for maximum benefit:
+
+    ```typescript
+    const pageAgent = new PageAgent({
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'your-api-key',
+      model: 'qwen3.5-plus',
+      transformRequestBody: (requestBody) => {
+        const [systemMessage, ...restMessages] = requestBody.messages
+
+        if (systemMessage.role !== 'system' || typeof systemMessage.content !== 'string') {
+          return requestBody
+        }
+
+        return {
+          ...requestBody,
+          messages: [
+            {
+              ...systemMessage,
+              content: [
+                {
+                  type: 'text',
+                  text: systemMessage.content,
+                  cache_control: { type: 'ephemeral' },
+                },
+              ],
+            },
+            ...restMessages,
+          ],
+        }
+      },
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Local LLMs
+
+Page Agent works with local OpenAI-compatible runtimes like Ollama and LM Studio for offline or LAN deployments.
+
+### Requirements
+
+<Warning>
+  Before connecting a local model, confirm all of the following:
+
+  - **CORS is enabled** — the browser cannot call a local endpoint that blocks cross-origin requests.
+  - **Context length ≥ 8000** — a typical page needs ~15k tokens; the default 4k context in most local runners causes truncation.
+  - **Tool call support** — the model and runtime must support `tool_choice`.
+  - **Model size ≥ 10B parameters** — smaller models generally cannot handle Page Agent's tool definitions.
+</Warning>
+
+### Ollama
+
+Tested on Ollama 0.15 with `qwen3:14b` (RTX 3090 24 GB).
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    OLLAMA_CONTEXT_LENGTH=64000 OLLAMA_HOST=0.0.0.0:11434 OLLAMA_ORIGINS="*" ollama serve
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    $env:OLLAMA_CONTEXT_LENGTH=64000; $env:OLLAMA_HOST="0.0.0.0:11434"; $env:OLLAMA_ORIGINS="*"; ollama serve
+    ```
+  </Tab>
+</Tabs>
+
+Then configure Page Agent:
+
+```typescript
+const pageAgent = new PageAgent({
+  baseURL: 'http://localhost:11434/v1',
+  model: 'qwen3:14b'
+  // no apiKey needed for Ollama
+});
+```
+
+<Note>
+  If browser-side requests fail, verify that Ollama was started with `OLLAMA_ORIGINS="*"` (or the origin of your page). Without it, the browser will receive a CORS error.
+</Note>
+
+### LM Studio
+
+```typescript
+const pageAgent = new PageAgent({
+  baseURL: 'http://127.0.0.1:1234/v1',
+  model: 'qwen/qwen3.5-27b'
+});
+```
+
+<Warning>
+  LM Studio does not support named `tool_choice` values. Set `disableNamedToolChoice: true` in your PageAgent config, otherwise tool call requests will fail.
+</Warning>

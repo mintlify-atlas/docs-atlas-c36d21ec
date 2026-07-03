@@ -1,0 +1,309 @@
+---
+title: "Extension API — window.PAGE_AGENT_EXT Reference"
+sidebarTitle: "Extension API"
+description: "Full reference for window.PAGE_AGENT_EXT injected by the Page Agent Chrome extension: execute(), stop(), ExecuteConfig, and auth token setup."
+---
+
+The Page Agent Chrome extension injects `window.PAGE_AGENT_EXT` into pages that have been authorized with a valid user token. This API lets your page JavaScript trigger multi-tab browser automation tasks without any server-side component — the extension handles navigation, tab management, and agent execution entirely in the browser.
+
+## Setup
+
+### 1. Install the Extension
+
+Install the Page Agent extension from the Chrome Web Store:
+
+[**Page Agent Ext — Chrome Web Store**](https://chromewebstore.google.com/detail/page-agent-ext/akldabonmimlicnjlflnapfeklbfemhj)
+
+For the latest pre-release builds, check [GitHub Releases](https://github.com/alibaba/page-agent/releases) directly.
+
+### 2. Install Type Definitions (Recommended)
+
+```bash
+npm install @page-agent/core --save-dev
+```
+
+### 3. Set the Auth Token
+
+The extension requires an explicit authorization token before it injects `window.PAGE_AGENT_EXT`. This prevents untrusted pages from silently triggering broad browser automation.
+
+1. Open the extension side panel in Chrome.
+2. Copy your auth token from the panel.
+3. Set it in your page's `localStorage`:
+
+```typescript
+localStorage.setItem('PageAgentExtUserAuthToken', 'your-token')
+```
+
+<Warning>
+  Only set this token on pages and origins you control and trust. The extension grants the authorized page the ability to navigate and interact with all tabs in the window.
+</Warning>
+
+---
+
+## Checking for Injection
+
+`window.PAGE_AGENT_EXT` is injected asynchronously after the page loads. Poll for it before use:
+
+```typescript
+async function waitForExtension(timeout = 1000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    if (window.PAGE_AGENT_EXT) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
+if (await waitForExtension()) {
+  // Safe to call window.PAGE_AGENT_EXT.execute(...)
+} else {
+  console.warn('Page Agent extension not detected.')
+}
+```
+
+---
+
+## `window.PAGE_AGENT_EXT_VERSION`
+
+A string containing the currently installed extension version. Check this before calling the main API if your code depends on capabilities added in a specific version.
+
+```typescript
+console.log(window.PAGE_AGENT_EXT_VERSION) // e.g. "0.4.2"
+```
+
+---
+
+## `window.PAGE_AGENT_EXT.execute(task, config)`
+
+Starts a new agent task. Returns a `Promise` that resolves when the task completes or rejects on a fatal error.
+
+```typescript
+const result = await window.PAGE_AGENT_EXT.execute(task, config)
+```
+
+### Parameters
+
+<ParamField path="task" type="string" required>
+  Natural language description of the task for the agent to complete. Be specific — include the exact steps, target elements, and any data the agent should retrieve or enter.
+
+  ```typescript
+  'Open a new tab, go to github.com, search for "page-agent", and return the number of stars on the first result.'
+  ```
+</ParamField>
+
+<ParamField path="config" type="ExecuteConfig" required>
+  LLM settings, tab scope options, and event callbacks. See [ExecuteConfig](#executeconfig) below.
+</ParamField>
+
+### Returns
+
+`Promise<ExecutionResult>`
+
+<ResponseField name="success" type="boolean">
+  `true` if the agent finished the task successfully.
+</ResponseField>
+
+<ResponseField name="data" type="string">
+  The agent's final response text.
+</ResponseField>
+
+<ResponseField name="history" type="HistoricalEvent[]">
+  Full ordered list of all events (steps, observations, errors) that occurred during the task.
+</ResponseField>
+
+---
+
+## ExecuteConfig
+
+<ParamField path="baseURL" type="string" required>
+  Base URL of the OpenAI-compatible LLM API. See [LLMConfig](/api/llm-config) for provider examples.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  Model identifier as accepted by the provider.
+</ParamField>
+
+<ParamField path="apiKey" type="string">
+  LLM API key. Omit for local runtimes or when using a proxy.
+</ParamField>
+
+<ParamField path="systemInstruction" type="string">
+  Global system-level instructions for the agent. Equivalent to `AgentConfig.instructions.system`. Applied to every step of the task.
+</ParamField>
+
+<ParamField path="includeInitialTab" type="boolean" default="true">
+  When `true`, the tab where your page JavaScript is running is included in the agent's tab scope. Set to `false` if the agent should operate only on newly opened tabs.
+</ParamField>
+
+<ParamField path="experimentalIncludeAllTabs" type="boolean" default="false">
+  When `true`, the agent can see and interact with every unpinned tab in the window, rather than only the tabs it opens itself. Use carefully — the agent may navigate tabs you expect to remain untouched.
+</ParamField>
+
+<ParamField path="onStatusChange" type="(status: AgentStatus) => void">
+  Called whenever the agent's lifecycle status changes. Use this to update loading indicators or enable/disable UI controls.
+
+  ```typescript
+  onStatusChange: (status) => {
+    button.disabled = status === 'running'
+  }
+  ```
+</ParamField>
+
+<ParamField path="onActivity" type="(activity: AgentActivity) => void">
+  Called for each ephemeral activity event — thinking, executing a tool, retrying, etc. Use this for real-time progress display.
+
+  ```typescript
+  onActivity: (activity) => {
+    if (activity.type === 'executing') {
+      statusEl.textContent = `Running: ${activity.tool}`
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField path="onHistoryUpdate" type="(history: HistoricalEvent[]) => void">
+  Called after each step with the full history array. Use this to stream completed steps into a log or timeline UI.
+</ParamField>
+
+---
+
+## `window.PAGE_AGENT_EXT.stop()`
+
+Sends a stop signal to the currently running task. The agent finishes its current tool call before halting; `execute()` resolves with `success: false`.
+
+```typescript
+stopButton.addEventListener('click', () => {
+  window.PAGE_AGENT_EXT?.stop()
+})
+```
+
+---
+
+## Full Example
+
+```typescript
+import type {
+  AgentActivity,
+  AgentStatus,
+  ExecutionResult,
+  HistoricalEvent,
+} from '@page-agent/core'
+
+async function runTask() {
+  const ready = await waitForExtension()
+  if (!ready) {
+    alert('Please install the Page Agent extension.')
+    return
+  }
+
+  const result: ExecutionResult = await window.PAGE_AGENT_EXT!.execute(
+    'Fill in the email field with test@example.com and click Submit',
+    {
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'sk-...', // ⚠️ Use a backend proxy in production
+      model: 'gpt-4.1-mini',
+      includeInitialTab: false,
+      onStatusChange: (status: AgentStatus) => {
+        console.log('Status:', status)
+      },
+      onActivity: (activity: AgentActivity) => {
+        console.log('Activity:', activity)
+      },
+      onHistoryUpdate: (history: HistoricalEvent[]) => {
+        console.log('Steps completed:', history.filter((e) => e.type === 'step').length)
+      },
+    }
+  )
+
+  console.log('Done:', result.success, result.data)
+}
+```
+
+---
+
+## ExecuteConfig TypeScript Type
+
+```typescript
+import type {
+  AgentActivity,
+  AgentStatus,
+  ExecutionResult,
+  HistoricalEvent,
+} from '@page-agent/core'
+
+export interface ExecuteConfig {
+  baseURL: string
+  model: string
+  apiKey?: string
+
+  /** Equivalent to AgentConfig.instructions.system */
+  systemInstruction?: string
+
+  /** Include the tab where page JS runs. Default: true */
+  includeInitialTab?: boolean
+
+  /**
+   * Control all unpinned tabs instead of only the agent's tab group.
+   * Experimental. Default: false.
+   */
+  experimentalIncludeAllTabs?: boolean
+
+  onStatusChange?: (status: AgentStatus) => void
+  onActivity?: (activity: AgentActivity) => void
+  onHistoryUpdate?: (history: HistoricalEvent[]) => void
+}
+```
+
+---
+
+## Window Type Declarations
+
+If you are not importing `@page-agent/core` as a dependency, add these declarations to a `.d.ts` file in your project to get IDE autocomplete:
+
+```typescript
+import type {
+  AgentActivity,
+  AgentStatus,
+  ExecutionResult,
+  HistoricalEvent,
+} from '@page-agent/core'
+
+interface ExecuteConfig {
+  baseURL: string
+  model: string
+  apiKey?: string
+  systemInstruction?: string
+  includeInitialTab?: boolean
+  experimentalIncludeAllTabs?: boolean
+  onStatusChange?: (status: AgentStatus) => void
+  onActivity?: (activity: AgentActivity) => void
+  onHistoryUpdate?: (history: HistoricalEvent[]) => void
+}
+
+declare global {
+  interface Window {
+    PAGE_AGENT_EXT_VERSION?: string
+    PAGE_AGENT_EXT?: {
+      version: string
+      execute: (task: string, config: ExecuteConfig) => Promise<ExecutionResult>
+      stop: () => void
+    }
+  }
+}
+```
+
+<Note>
+  Install `@page-agent/core` as a dev dependency to get the complete, maintained type definitions for `AgentStatus`, `AgentActivity`, `ExecutionResult`, and `HistoricalEvent`:
+
+  ```bash
+  npm install @page-agent/core --save-dev
+  ```
+</Note>
+
+---
+
+## Limitations
+
+<Warning>
+  The Extension API only works in **normal browser windows**. It relies on the Chrome Tab Groups API, which is not available in pop-up windows or PWA App windows.
+</Warning>

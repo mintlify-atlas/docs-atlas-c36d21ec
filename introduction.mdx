@@ -1,0 +1,85 @@
+---
+title: "Page Agent: In-Page GUI Agent for Web Automation"
+sidebarTitle: "Introduction"
+description: "Page Agent is a JavaScript library that embeds a GUI agent directly inside your webpage, letting users control any web UI with natural language — no backend required."
+---
+
+Page Agent is a purely web-based GUI agent that lives inside your webpage. Unlike server-side automation tools such as `browser-use` or Playwright, Page Agent runs entirely in the browser as an in-page JavaScript library — no Python runtime, no headless browser, no browser extension required. Web developers drop it into an existing site and their users immediately gain the ability to describe what they want in plain English (or Chinese), and watch the page respond.
+
+## Core Features
+
+<CardGroup cols={2}>
+  <Card title="🧠 Smart DOM Analysis" icon="brain">
+    Reads and reasons about your page through its DOM structure — no screenshots, no multimodal models. High-intensity dehydration produces a compact, text-based representation that standard LLMs can process quickly and accurately.
+  </Card>
+  <Card title="⚡ Zero Backend" icon="bolt">
+    Import via CDN or npm. Point the agent at any OpenAI-compatible LLM endpoint. Nothing new to deploy server-side — the agent calls the LLM directly from the browser.
+  </Card>
+  <Card title="🔑 Bring Your Own LLM" icon="key">
+    Works with any OpenAI-compatible API: Alibaba Qwen, OpenAI, Anthropic (via proxy), Ollama, LM Studio, and more. You supply the `baseURL`, `model`, and `apiKey` — Page Agent does the rest.
+  </Card>
+  <Card title="🔒 Secure & Controllable" icon="lock">
+    Supports operation allowlists and blocklists, data masking via `transformPageContent`, and custom system instructions. Make the agent follow your product's rules rather than acting on whatever the DOM happens to contain.
+  </Card>
+  <Card title="♿ Accessible Intelligence" icon="universal-access">
+    Provides a natural-language interface for complex B2B systems and admin panels, making software approachable for every user — including those relying on voice commands or screen readers.
+  </Card>
+  <Card title="🐙 Optional Multi-Page Extension" icon="puzzle-piece">
+    For tasks that span multiple browser tabs, the optional Chrome Extension (PageAgentExt) gives the agent browser-level control: open, switch, and close tabs — without changing a line of your core integration.
+  </Card>
+</CardGroup>
+
+## Page Agent vs. browser-use
+
+Page Agent builds on concepts pioneered by `browser-use`, but it solves a different problem. The table below captures the key differences:
+
+| | **page-agent** | **browser-use** |
+|---|---|---|
+| **Deployment** | Embedded component — ships inside your webpage | External tool — runs alongside a Python script |
+| **Scope** | Current page (designed for SPAs) | Entire browser, multiple tabs |
+| **Target Users** | Web developers building products | Scraper & agent developers |
+| **Primary Use Case** | UX enhancement for end-users | Automated data extraction & task runners |
+| **Runtime** | Browser JavaScript | Python + Playwright |
+| **Multimodal** | No (text/DOM only) | Yes (screenshots) |
+
+<Note>
+  Page Agent is intentionally scoped to client-side web enhancement, not server-side automation. For tasks that need to cross browser tabs, pair it with the optional [Chrome Extension](https://alibaba.github.io/page-agent/docs/features/chrome-extension).
+</Note>
+
+## Use Cases
+
+- **SaaS AI Copilot** — Ship an AI copilot in your product in a few lines of code, with no backend rewrite. Users describe a goal; the agent drives the UI.
+- **Smart Form Filling** — Turn 20-click ERP or CRM workflows into a single sentence. Perfect for admin panels and data-entry-heavy applications.
+- **Accessibility** — Give visually impaired or elderly users a natural-language interface to any web app. Connect to a screen reader or voice assistant as the input channel.
+- **Interactive Training** — Let AI demonstrate complete workflows in real time — e.g., "show me how to submit an expense report" — so users learn by watching.
+- **Multi-Page Automation** — Extend your in-page agent across browser tabs with the Chrome Extension for end-to-end, multi-step workflows.
+
+## Architecture: The Re-Act Loop
+
+Page Agent follows a **Re-Act** (Reason + Act) loop inspired by browser-use. Each step consists of four stages:
+
+```
+Observe → Think → Act → Loop
+```
+
+1. **Observe** — `PageController` reads the live DOM, extracts a compact text representation of all interactive elements, and captures the current URL and scroll state.
+2. **Think** — The LLM receives the page snapshot along with the task description and the full history of previous steps. It reflects on what happened, updates its short-term memory, decides on a next goal, and chooses an action tool to call.
+3. **Act** — The chosen tool is executed (e.g., `click`, `type`, `scroll`, `done`). The result is appended to history.
+4. **Loop** — Steps repeat until the agent calls `done`, the abort signal fires, or `maxSteps` is reached.
+
+The **reflection-before-action** structure (fields `evaluation_previous_goal`, `memory`, `next_goal`) is enforced in the LLM's tool call schema, keeping the agent self-correcting across every step.
+
+<Info>
+  Page Agent uses a text-only DOM representation — no screenshots, no multimodal models. This means standard chat/completion models work out of the box, and page content never leaves the browser as an image.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a working agent on your page in under five minutes — CDN one-liner or npm install.
+  </Card>
+  <Card title="Models" icon="microchip" href="https://alibaba.github.io/page-agent/docs/features/models">
+    Browse the tested LLM list, including a free testing API for evaluation.
+  </Card>
+</CardGroup>

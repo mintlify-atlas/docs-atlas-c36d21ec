@@ -1,0 +1,127 @@
+---
+title: "Guide Agent Behavior with Custom Instructions"
+sidebarTitle: "Custom Instructions"
+description: "Inject system-level directives and per-page context into Page Agent using the instructions config option to shape how the agent reasons and acts."
+---
+
+The `instructions` configuration option lets you influence how Page Agent interprets tasks and interacts with your application. You can provide global system-level directives that apply to every task, per-page instructions that adapt dynamically to the current URL, or a fully custom system prompt for complete control over the agent's behavior.
+
+## System Instructions
+
+System instructions are global directives applied to **all tasks**. Use them to define the agent's role, working style, and hard behavioral boundaries — for example, preventing the agent from performing destructive actions without explicit confirmation.
+
+```typescript
+const agent = new PageAgent({
+  instructions: {
+    system: `You are a professional e-commerce assistant.
+
+Guidelines:
+- Always confirm before submitting orders
+- Double-check prices and quantities
+- Report errors immediately instead of retrying blindly`,
+  }
+})
+```
+
+<Tip>
+  Keep system instructions concise and action-oriented. Long, verbose prompts dilute the signal and consume tokens on every step.
+</Tip>
+
+## Per-Page Instructions
+
+The `getPageInstructions` callback is invoked **before each step** with the current `window.location.href`. Return a string to inject page-specific context, or `undefined` to skip. This is ideal for guiding the agent differently on checkout, product listing, settings, or any page that warrants special care.
+
+```typescript
+const agent = new PageAgent({
+  instructions: {
+    system: 'You are an order management assistant.',
+
+    getPageInstructions: (url) => {
+      if (url.includes('/checkout')) {
+        return `This is the checkout page.
+- Verify shipping address before proceeding
+- Check if any discounts are applied
+- Confirm the total amount with the user`
+      }
+
+      if (url.includes('/products')) {
+        return `This is the product listing page.
+- Use filters to narrow down search results
+- Check stock availability before adding to cart`
+      }
+
+      return undefined // No special instructions for other pages
+    },
+  }
+})
+```
+
+<Note>
+  Both `system` and `getPageInstructions` can be used independently or together. If `system` is empty, the `<system_instructions>` block is omitted from the prompt. If `getPageInstructions` returns `undefined` or `null`, the `<page_instructions>` block is omitted.
+</Note>
+
+## How Instructions Are Injected
+
+Before each step, Page Agent prepends the resolved instructions to the user prompt in a structured XML envelope:
+
+```xml
+<instructions>
+<system_instructions>
+You are a professional e-commerce assistant.
+...
+</system_instructions>
+<page_instructions>
+This is the checkout page.
+...
+</page_instructions>
+</instructions>
+
+<!-- followed by agent state, history, and browser state -->
+```
+
+This structure keeps instructions clearly separated from the task description and browser context, helping the model apply them reliably.
+
+## Experimental: llms.txt Support
+
+Page Agent can automatically fetch `/llms.txt` from the current site origin and include it as context. This opt-in feature is useful when the target site publishes LLM-friendly documentation about its own UI.
+
+```typescript
+const agent = new PageAgent({
+  experimentalLlmsTxt: true,
+})
+```
+
+<Note>
+  The file is fetched at most once per origin per task execution. If the site does not serve `/llms.txt`, the fetch is silently ignored.
+</Note>
+
+## Custom System Prompt Override
+
+For advanced use cases, `customSystemPrompt` completely replaces the built-in system prompt:
+
+```typescript
+const agent = new PageAgent({
+  customSystemPrompt: `You are a specialized data-entry robot. ...`,
+})
+```
+
+<Warning>
+  Using `customSystemPrompt` disables all built-in agent behavior guidelines. Incorrect or incomplete prompts may cause the agent to fail to complete tasks, use tools incorrectly, or loop indefinitely. Use this only if you fully understand the default prompt structure.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Be explicit about high-risk operations" icon="triangle-exclamation">
+    Name specific actions the agent must not take without confirmation — "Never click Delete", "Never place orders above $500 without asking."
+  </Card>
+  <Card title="Combine system + page instructions" icon="layer-group">
+    Use system instructions for global role/policy, and page instructions for page-specific navigation guidance or field-level hints.
+  </Card>
+  <Card title="Use allowlists for critical flows" icon="shield-check">
+    For checkout, payment, or destructive flows, explicitly list every action that is permitted rather than describing what is forbidden.
+  </Card>
+  <Card title="Keep instructions testable" icon="flask">
+    After writing instructions, run a task that would normally trigger the restricted behavior and verify the agent respects the constraint.
+  </Card>
+</CardGroup>

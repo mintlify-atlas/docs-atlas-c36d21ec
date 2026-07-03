@@ -1,0 +1,344 @@
+---
+title: "Page Agent TypeScript Types Reference"
+sidebarTitle: "Types"
+description: "All exported TypeScript types from @page-agent/core: ExecutionResult, AgentStatus, AgentActivity, HistoricalEvent, AgentStepEvent, PageAgentTool, and more."
+---
+
+All public types are exported from the `page-agent` package (re-exported from `@page-agent/core`). Import them directly for full TypeScript type safety in your application code or build tooling integrations.
+
+```typescript
+import type {
+  ExecutionResult,
+  AgentStatus,
+  AgentActivity,
+  HistoricalEvent,
+  AgentStepEvent,
+  AgentReflection,
+  PageAgentTool,
+  SupportedLanguage,
+} from 'page-agent'
+```
+
+---
+
+## AgentStatus
+
+Represents the lifecycle state of an agent instance. Transitions flow from `idle` → `running` → `completed | error | stopped`.
+
+```typescript
+type AgentStatus = 'idle' | 'running' | 'completed' | 'error' | 'stopped'
+```
+
+<ResponseField name="idle" type="string">
+  The agent has been constructed but has not yet started a task, or the previous task has been fully torn down.
+</ResponseField>
+
+<ResponseField name="running" type="string">
+  A task is currently in progress. The agent is executing steps.
+</ResponseField>
+
+<ResponseField name="completed" type="string">
+  The most recent task finished successfully — the LLM called the `done` tool with `success: true`.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  The task terminated due to an unrecoverable error (LLM error, step limit exceeded, etc.).
+</ResponseField>
+
+<ResponseField name="stopped" type="string">
+  The task was cancelled by a user or programmatic call to `agent.stop()`.
+</ResponseField>
+
+---
+
+## AgentActivity
+
+Ephemeral, real-time state describing what the agent is doing *right now*. Unlike `HistoricalEvent`, activities are not persisted. Absence of an activity event means the agent is idle. Listen to the `activity` event on the agent instance to update live UI.
+
+```typescript
+type AgentActivity =
+  | { type: 'thinking' }
+  | { type: 'executing'; tool: string; input: unknown }
+  | { type: 'executed'; tool: string; input: unknown; output: string; duration: number }
+  | { type: 'retrying'; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string }
+```
+
+<ResponseField name="thinking" type="object">
+  The LLM is generating its next action.
+</ResponseField>
+
+<ResponseField name="executing" type="object">
+  A tool call has been dispatched and is awaiting its result.
+
+  <Expandable title="fields">
+    <ResponseField name="tool" type="string">Tool name being invoked.</ResponseField>
+    <ResponseField name="input" type="unknown">Raw input argument passed to the tool.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="executed" type="object">
+  A tool call completed successfully.
+
+  <Expandable title="fields">
+    <ResponseField name="tool" type="string">Tool name that was invoked.</ResponseField>
+    <ResponseField name="input" type="unknown">Input that was passed to the tool.</ResponseField>
+    <ResponseField name="output" type="string">String result returned by the tool.</ResponseField>
+    <ResponseField name="duration" type="number">Wall-clock execution time in milliseconds.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="retrying" type="object">
+  The LLM call failed and a retry is about to be attempted.
+
+  <Expandable title="fields">
+    <ResponseField name="attempt" type="number">The upcoming attempt number (1-indexed).</ResponseField>
+    <ResponseField name="maxAttempts" type="number">Total retries allowed before giving up.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error" type="object">
+  A terminal error has occurred.
+
+  <Expandable title="fields">
+    <ResponseField name="message" type="string">Human-readable error description.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## ExecutionResult
+
+Returned by `agent.execute(task)` and by the Extension API's `window.PAGE_AGENT_EXT.execute()`.
+
+```typescript
+interface ExecutionResult {
+  success: boolean
+  data: string
+  history: HistoricalEvent[]
+}
+```
+
+<ResponseField name="success" type="boolean">
+  `true` if the agent called `done` with `success: true`; `false` on error or user stop.
+</ResponseField>
+
+<ResponseField name="data" type="string">
+  The agent's final summary text — the value passed to the `done` tool's `text` parameter.
+</ResponseField>
+
+<ResponseField name="history" type="HistoricalEvent[]">
+  Complete ordered list of all events that occurred during the task. See [HistoricalEvent](#historicalevent) below.
+</ResponseField>
+
+---
+
+## HistoricalEvent
+
+A persisted record of something that occurred during a task. Stored in `ExecutionResult.history` and streamed via `onAfterStep` and `onHistoryUpdate`.
+
+```typescript
+type HistoricalEvent =
+  | AgentStepEvent
+  | { type: 'observation'; content: string }
+  | { type: 'user_takeover' }
+  | { type: 'retry'; message: string; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string; rawResponse?: unknown }
+```
+
+<ResponseField name="AgentStepEvent" type="object">
+  A completed LLM reasoning + tool-execution cycle. See [AgentStepEvent](#agentstepevent) for the full structure.
+</ResponseField>
+
+<ResponseField name="observation" type="object">
+  A persistent observation injected into the agent's memory. Stays in context for the duration of the task.
+
+  <Expandable title="fields">
+    <ResponseField name="content" type="string">The observation text.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="user_takeover" type="object">
+  Marks a point at which the user briefly took manual control of the browser.
+</ResponseField>
+
+<ResponseField name="retry" type="object">
+  Records that an LLM call was retried.
+
+  <Expandable title="fields">
+    <ResponseField name="message" type="string">Reason for the retry.</ResponseField>
+    <ResponseField name="attempt" type="number">Attempt number that is about to be made.</ResponseField>
+    <ResponseField name="maxAttempts" type="number">Maximum retries configured.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error" type="object">
+  A fatal error event that ended the task.
+
+  <Expandable title="fields">
+    <ResponseField name="message" type="string">Error message.</ResponseField>
+    <ResponseField name="rawResponse" type="unknown">Raw LLM response payload, if available, for debugging.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## AgentStepEvent
+
+One complete step: the LLM reflected on the previous action and chose a new one.
+
+```typescript
+interface AgentStepEvent {
+  type: 'step'
+  stepIndex: number
+  reflection: Partial<AgentReflection>
+  action: {
+    name: string
+    input: any
+    output: string
+  }
+  usage: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    cachedTokens?: number
+    reasoningTokens?: number
+  }
+  rawResponse?: unknown
+  rawRequest?: unknown
+}
+```
+
+<ResponseField name="type" type="'step'">
+  Discriminant literal — always `'step'`.
+</ResponseField>
+
+<ResponseField name="stepIndex" type="number">
+  Zero-indexed position of this step within the task.
+</ResponseField>
+
+<ResponseField name="reflection" type="Partial<AgentReflection>">
+  The LLM's self-reflection before acting. See [AgentReflection](#agentreflection).
+</ResponseField>
+
+<ResponseField name="action" type="object">
+  The tool call made during this step.
+
+  <Expandable title="fields">
+    <ResponseField name="name" type="string">Tool name that was called.</ResponseField>
+    <ResponseField name="input" type="any">Parsed arguments passed to the tool.</ResponseField>
+    <ResponseField name="output" type="string">String result returned by the tool.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token consumption for this step's LLM call.
+
+  <Expandable title="fields">
+    <ResponseField name="promptTokens" type="number">Input tokens.</ResponseField>
+    <ResponseField name="completionTokens" type="number">Output tokens.</ResponseField>
+    <ResponseField name="totalTokens" type="number">Sum of prompt and completion tokens.</ResponseField>
+    <ResponseField name="cachedTokens" type="number">Prompt-cache hit tokens (provider-dependent).</ResponseField>
+    <ResponseField name="reasoningTokens" type="number">Internal reasoning tokens (OpenAI o-series models).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="rawResponse" type="unknown">
+  Unprocessed LLM response object. Useful for debugging provider-specific fields.
+</ResponseField>
+
+<ResponseField name="rawRequest" type="unknown">
+  Unprocessed LLM request object. Useful for inspecting exactly what was sent.
+</ResponseField>
+
+---
+
+## AgentReflection
+
+The structured reasoning state the LLM must produce before every tool call. Enforces a reflection-before-action mental model.
+
+```typescript
+interface AgentReflection {
+  evaluation_previous_goal: string
+  memory: string
+  next_goal: string
+}
+```
+
+<ResponseField name="evaluation_previous_goal" type="string">
+  The LLM's assessment of whether the previous action achieved its intended goal.
+</ResponseField>
+
+<ResponseField name="memory" type="string">
+  Key information the LLM wants to carry forward into subsequent steps.
+</ResponseField>
+
+<ResponseField name="next_goal" type="string">
+  A concise statement of what the LLM intends to accomplish in the upcoming action.
+</ResponseField>
+
+---
+
+## PageAgentTool
+
+The interface for both built-in and custom tools. The `execute` function runs with the `PageAgentCore` instance as `this`, giving it access to `this.pageController` and other agent internals.
+
+```typescript
+interface PageAgentTool<TParams = any> {
+  description: string
+  inputSchema: z.ZodType<TParams>
+  execute: (
+    this: PageAgentCore,
+    args: TParams,
+    ctx: ToolContext
+  ) => Promise<string>
+}
+
+interface ToolContext {
+  signal: AbortSignal
+}
+```
+
+<ResponseField name="description" type="string">
+  Natural language description sent to the LLM to help it decide when to call this tool.
+</ResponseField>
+
+<ResponseField name="inputSchema" type="z.ZodType">
+  Zod schema that defines and validates the tool's input parameters. Converted to a JSON Schema for the LLM.
+</ResponseField>
+
+<ResponseField name="execute" type="function">
+  Async function that performs the tool action. Must return a descriptive result string. **Must honour `ctx.signal`** — check `signal.throwIfAborted()` in any loop or pass it to `fetch`.
+</ResponseField>
+
+### The `tool()` helper
+
+Use the `tool()` helper for full TypeScript inference on `execute`'s parameter types.
+
+```typescript
+import { tool } from 'page-agent'
+// or: import { tool } from '@page-agent/core'
+import { z } from 'zod/v4'
+
+const myTool = tool({
+  description: 'Fetch JSON from a URL and return it as a string.',
+  inputSchema: z.object({
+    url: z.string().url(),
+  }),
+  execute: async function (input, { signal }) {
+    const res = await fetch(input.url, { signal })
+    const data = await res.json()
+    return JSON.stringify(data)
+  },
+})
+```
+
+---
+
+## SupportedLanguage
+
+```typescript
+type SupportedLanguage = 'en-US' | 'zh-CN'
+```
+
+Used by `AgentConfig.language`. Controls the language of agent-generated UI text and internal prompts.

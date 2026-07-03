@@ -1,0 +1,230 @@
+---
+title: "Build a Custom UI for Page Agent"
+sidebarTitle: "Custom UI"
+description: "Replace the built-in Panel with your own chat widget or control surface by wiring PageAgentCore events to any frontend framework or vanilla JavaScript."
+---
+
+Page Agent's core logic (`PageAgentCore`) is fully decoupled from its visual interface through a clean event system. The built-in floating panel is just one possible UI — by using `PageAgentCore` directly you can build a sidebar, a chat window, a command palette, a headless test harness, or anything else, all backed by the same agent engine.
+
+## Architecture Overview
+
+`PageAgent` (the default export from `page-agent`) composes three independent modules:
+
+| Module | Package | Responsibility |
+|---|---|---|
+| `PageAgentCore` | `@page-agent/core` | ReAct loop, LLM calls, tool execution, event emission |
+| `PageController` | `@page-agent/page-controller` | DOM extraction, element interaction, visual mask |
+| `Panel` | `@page-agent/ui` | The default floating chat panel |
+
+Swapping the Panel out is as simple as using `PageAgentCore` (+ `PageController`) directly and subscribing to the events you need.
+
+---
+
+## Event Streams
+
+`PageAgentCore` exposes two distinct event streams with different semantics:
+
+| | `historychange` | `activity` |
+|---|---|---|
+| **Persistence** | Persisted in `agent.history` | Transient (UI only) |
+| **Sent to LLM** | Yes | No |
+| **Purpose** | Agent memory, display completed steps | Real-time feedback (spinners, status text) |
+| **When to use** | Rendering a step-by-step history list | Showing a loading indicator or current action |
+
+### All Events
+
+| Event | Payload | Description |
+|---|---|---|
+| `statuschange` | `Event` | Status changed: `idle → running → completed / error / stopped`. Read `agent.status` in the handler. |
+| `historychange` | `Event` | `agent.history` was updated. Re-render your history list from `agent.history`. |
+| `activity` | `CustomEvent<AgentActivity>` | Transient real-time activity: `thinking`, `executing`, `executed`, `retrying`, `error`. |
+| `dispose` | `Event` | The agent has been disposed. Clean up your UI. |
+
+---
+
+## Minimal Custom UI Example
+
+```typescript
+import { PageAgentCore } from '@page-agent/core'
+import { PageController } from '@page-agent/page-controller'
+import type { AgentActivity } from '@page-agent/core'
+
+const agent = new PageAgentCore({
+  pageController: new PageController({ enableMask: false }),
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: 'your-api-key',
+  model: 'gpt-5.2',
+})
+
+// Real-time activity display
+agent.addEventListener('activity', (e) => {
+  const activity = (e as CustomEvent<AgentActivity>).detail
+  switch (activity.type) {
+    case 'thinking':
+      showSpinner('Thinking...')
+      break
+    case 'executing':
+      showSpinner(`Running: ${activity.tool}`)
+      break
+    case 'executed':
+      hideSpinner()
+      break
+    case 'error':
+      showError(activity.message)
+      break
+  }
+})
+
+// Status transitions
+agent.addEventListener('statuschange', () => {
+  updateStatusBadge(agent.status)
+})
+
+// History updates (re-render step list)
+agent.addEventListener('historychange', () => {
+  renderHistoryList(agent.history)
+})
+
+// Cleanup when agent is disposed
+agent.addEventListener('dispose', () => {
+  removeMyUI()
+})
+
+// Run a task from user input
+async function runTask(task: string) {
+  const result = await agent.execute(task)
+  showResult(result.data)
+}
+```
+
+---
+
+## React Hook Example
+
+If your custom UI is built in React, bind agent events to state with `useEffect`:
+
+```tsx
+import { useState, useEffect } from 'react'
+import type { PageAgentCore, AgentActivity, HistoricalEvent, AgentStatus } from '@page-agent/core'
+
+function useAgent(agent: PageAgentCore) {
+  const [status, setStatus] = useState<AgentStatus>(agent.status)
+  const [history, setHistory] = useState<HistoricalEvent[]>(agent.history)
+  const [activity, setActivity] = useState<AgentActivity | null>(null)
+
+  useEffect(() => {
+    const onStatus = () => setStatus(agent.status)
+    const onHistory = () => setHistory([...agent.history])
+    const onActivity = (e: Event) =>
+      setActivity((e as CustomEvent<AgentActivity>).detail)
+
+    agent.addEventListener('statuschange', onStatus)
+    agent.addEventListener('historychange', onHistory)
+    agent.addEventListener('activity', onActivity)
+
+    return () => {
+      agent.removeEventListener('statuschange', onStatus)
+      agent.removeEventListener('historychange', onHistory)
+      agent.removeEventListener('activity', onActivity)
+    }
+  }, [agent])
+
+  return { status, history, activity }
+}
+```
+
+---
+
+## Full Assembly: Core + Controller + Custom UI
+
+The pattern below mirrors what `PageAgent` does internally, but substitutes your own React component for the default `Panel`:
+
+```typescript
+import { createRoot } from 'react-dom/client'
+import { PageAgentCore } from '@page-agent/core'
+import { PageController } from '@page-agent/page-controller'
+
+// 1. Create PageController
+const pageController = new PageController({ enableMask: true })
+
+// 2. Create PageAgentCore with controller
+const agent = new PageAgentCore({
+  pageController,
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: 'your-api-key',
+  model: 'gpt-5.2',
+})
+
+// 3. Mount your custom React UI
+const container = document.createElement('div')
+document.body.appendChild(container)
+const root = createRoot(container)
+root.render(<MyAgentUI agent={agent} />)
+
+// 4. Enable the ask_user tool (optional)
+//    options.signal aborts when the task is stopped or disposed
+agent.onAskUser = async (question, options) => {
+  return window.prompt(question) ?? ''
+}
+
+// 5. Execute tasks
+await agent.execute('Fill the registration form with test data')
+
+// 6. Cleanup
+agent.dispose()
+```
+
+---
+
+## AgentActivity Type Reference
+
+```typescript
+type AgentActivity =
+  | { type: 'thinking' }
+  | { type: 'executing'; tool: string; input: unknown }
+  | { type: 'executed'; tool: string; input: unknown; output: string; duration: number }
+  | { type: 'retrying'; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string }
+```
+
+## HistoricalEvent Type Reference
+
+```typescript
+type HistoricalEvent =
+  | { type: 'step'; stepIndex: number; reflection: Partial<AgentReflection>; action: { name: string; input: any; output: string } }
+  | { type: 'observation'; content: string }
+  | { type: 'user_takeover' }
+  | { type: 'retry'; message: string; attempt: number; maxAttempts: number }
+  | { type: 'error'; message: string }
+```
+
+---
+
+## Using the Built-in Panel Manually
+
+If you want the default Panel's appearance but need fine-grained control over when it mounts or how it is configured, you can instantiate it directly from `@page-agent/ui`:
+
+```typescript
+import { PageAgentCore } from '@page-agent/core'
+import { PageController } from '@page-agent/page-controller'
+import { Panel } from '@page-agent/ui'
+
+const agent = new PageAgentCore({
+  pageController: new PageController({ enableMask: true }),
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: 'your-api-key',
+  model: 'gpt-5.2',
+})
+
+// Mount the default panel manually
+const panel = new Panel(agent, {
+  language: 'en-US',
+  promptForNextTask: true,
+})
+
+panel.show()
+```
+
+<Note>
+  `Panel` listens to all four agent events (`statuschange`, `historychange`, `activity`, `dispose`) and automatically sets `agent.onAskUser` to route questions through the panel's input field. Calling `agent.dispose()` also calls `panel.dispose()` via the `dispose` event.
+</Note>

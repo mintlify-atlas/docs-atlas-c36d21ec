@@ -1,0 +1,169 @@
+---
+title: "Multi-Page Browser Automation with the Chrome Extension"
+sidebarTitle: "Chrome Extension"
+description: "Install the Page Agent Chrome extension to unlock multi-tab automation, browser-level control, and tasks triggered from page JavaScript or external agent clients."
+---
+
+The Page Agent Chrome extension is an optional companion to the `page-agent` JavaScript library. While `PageAgent.js` handles in-page automation on its own, the extension adds three additional capabilities: running tasks that span multiple tabs, browser-level navigation control, and the ability to trigger automation from page JavaScript or from external agent systems (such as local MCP servers or cloud agents) via the `window.PAGE_AGENT_EXT` API.
+
+## Key Features
+
+<CardGroup cols={3}>
+  <Card title="Multi-Page Tasks" icon="arrow-right-arrow-left">
+    Run tasks across multiple pages and tabs without being limited to a single page context.
+  </Card>
+  <Card title="Browser-Level Control" icon="compass">
+    Enable richer automation including cross-tab navigation, page switching, and tab management.
+  </Card>
+  <Card title="Open Integration API" icon="plug">
+    With explicit user authorization, page JS, local agents, or cloud agents can trigger multi-page tasks through the extension.
+  </Card>
+</CardGroup>
+
+## Installation
+
+<Steps>
+  <Step title="Install the extension">
+    Install from the Chrome Web Store (stable) or GitHub Releases (faster updates):
+
+    - **Chrome Web Store:** [Page Agent Ext](https://chromewebstore.google.com/detail/page-agent-ext/akldabonmimlicnjlflnapfeklbfemhj)
+    - **GitHub Releases:** [alibaba/page-agent/releases](https://github.com/alibaba/page-agent/releases)
+  </Step>
+  <Step title="Install type definitions (recommended)">
+    Add `@page-agent/core` to your project for full TypeScript support:
+
+    ```bash
+    npm install @page-agent/core --save-dev
+    ```
+  </Step>
+  <Step title="Set the auth token">
+    Open the extension side panel, copy your auth token, then set it in your page's `localStorage`. The extension will only expose `window.PAGE_AGENT_EXT` to pages that present a matching token.
+
+    ```typescript
+    // Set this in your trusted application only
+    localStorage.setItem('PageAgentExtUserAuthToken', 'your-token-from-extension')
+    ```
+
+    <Warning>
+      Never share the auth token with untrusted pages or third-party scripts. The extension has broad browser permissions — token-based access ensures only applications you explicitly trust can trigger automation.
+    </Warning>
+  </Step>
+</Steps>
+
+## Quick Start
+
+After setting the auth token, wait for the extension to inject `window.PAGE_AGENT_EXT`, then call `execute`:
+
+```typescript
+import type { AgentActivity, AgentStatus, ExecutionResult, HistoricalEvent } from '@page-agent/core'
+
+// Wait for extension injection (up to 1 second)
+async function waitForExtension(timeout = 1000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    if (window.PAGE_AGENT_EXT) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return false
+}
+
+if (await waitForExtension()) {
+  const result = await window.PAGE_AGENT_EXT!.execute(
+    'Search for "page-agent" on GitHub and open the first result',
+    {
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'your-api-key',
+      model: 'gpt-5.2',
+      onStatusChange: (status) => console.log('Status:', status),
+      onActivity: (activity) => console.log('Activity:', activity),
+    }
+  )
+  console.log('Result:', result)
+}
+```
+
+## API Reference
+
+### `PAGE_AGENT_EXT.execute(task, config)`
+
+Executes a natural-language browser task. Returns a `Promise<ExecutionResult>` that resolves when the task completes (or fails).
+
+<ParamField path="task" type="string" required>
+  Natural-language description of the task to perform.
+</ParamField>
+
+<ParamField path="config" type="ExecuteConfig" required>
+  LLM settings, scope options, and event callbacks. See the table below.
+</ParamField>
+
+**`ExecuteConfig` properties:**
+
+| Property | Type | Required | Description |
+|---|---|---|---|
+| `baseURL` | `string` | Yes | LLM API endpoint URL |
+| `model` | `string` | Yes | Model name |
+| `apiKey` | `string` | No | LLM API key |
+| `systemInstruction` | `string` | No | Global system-level instructions (equivalent to `AgentConfig.instructions.system`) |
+| `includeInitialTab` | `boolean` | No | Whether to include the tab where `execute` was called. Default: `true` |
+| `experimentalIncludeAllTabs` | `boolean` | No | Control all unpinned tabs in the window instead of only the tab group. Default: `false` |
+| `onStatusChange` | `(status: AgentStatus) => void` | No | Called when agent lifecycle status changes |
+| `onActivity` | `(activity: AgentActivity) => void` | No | Called for real-time activity updates (thinking, executing, etc.) |
+| `onHistoryUpdate` | `(history: HistoricalEvent[]) => void` | No | Called after each step with the full event history |
+
+### `PAGE_AGENT_EXT.stop()`
+
+Sends a cancellation signal to the currently running task. The task will stop at the next cooperative cancellation point.
+
+```typescript
+// Stop current task execution
+window.PAGE_AGENT_EXT!.stop()
+```
+
+### `PAGE_AGENT_EXT_VERSION`
+
+A version string injected alongside the main API object. Use it to check extension capabilities before calling the API:
+
+```typescript
+if (window.PAGE_AGENT_EXT_VERSION) {
+  console.log('Extension version:', window.PAGE_AGENT_EXT_VERSION)
+}
+```
+
+## Window Type Declaration
+
+If you prefer not to install `@page-agent/core`, add the following declaration to your project:
+
+```typescript
+import type { AgentActivity, AgentStatus, ExecutionResult, HistoricalEvent } from '@page-agent/core'
+
+interface ExecuteConfig {
+  baseURL: string
+  model: string
+  apiKey?: string
+  systemInstruction?: string
+  includeInitialTab?: boolean
+  experimentalIncludeAllTabs?: boolean
+  onStatusChange?: (status: AgentStatus) => void
+  onActivity?: (activity: AgentActivity) => void
+  onHistoryUpdate?: (history: HistoricalEvent[]) => void
+}
+
+type Execute = (task: string, config: ExecuteConfig) => Promise<ExecutionResult>
+
+declare global {
+  interface Window {
+    PAGE_AGENT_EXT_VERSION?: string
+    PAGE_AGENT_EXT?: {
+      version: string
+      execute: Execute
+      stop: () => void
+    }
+  }
+}
+```
+
+## Limitations
+
+<Warning>
+  **Normal browser windows only.** The extension relies on the Chrome tab group API, which does not work in pop-up windows or PWA app windows. Run your tasks from a standard browser window.
+</Warning>

@@ -1,0 +1,339 @@
+---
+title: "PageController Class — DOM Operations API Reference"
+sidebarTitle: "PageController"
+description: "Full API reference for PageController from @page-agent/page-controller — DOM extraction, interactive element tracking, and browser action simulation."
+---
+
+`PageController` from `@page-agent/page-controller` manages all DOM interaction on behalf of the agent. It handles page-state extraction (building a simplified HTML snapshot for the LLM), interactive element index mapping, synthetic event dispatch, scrolling, and optional visual masking. The class is intentionally **independent of the LLM** — every public method is async for compatibility with potential remote-calling scenarios, but no network calls are made internally.
+
+[`PageAgent`](/api/page-agent) creates and manages a `PageController` for you. Instantiate it directly only when building on top of [`PageAgentCore`](/api/page-agent-core) or when you need raw DOM control without an agent loop.
+
+## Import
+
+```typescript
+import { PageController } from '@page-agent/page-controller'
+```
+
+## Constructor
+
+```typescript
+new PageController(config?: PageControllerConfig)
+```
+
+The `config` argument is optional. When `enableMask` is `true` the mask overlay is initialised asynchronously via dynamic import to avoid loading CSS in Node environments.
+
+### `PageControllerConfig`
+
+<ParamField body="enableMask" type="boolean" default="false">
+  Show a visual overlay that blocks user pointer interaction while the agent is operating. `PageAgent` sets this to `true` by default; when using `PageController` directly it defaults to `false`.
+</ParamField>
+
+<ParamField body="viewportExpansion" type="number | -1">
+  Controls how far beyond the visible viewport interactive elements are extracted. Pass `-1` to capture the entire page regardless of scroll position.
+</ParamField>
+
+<ParamField body="includeAttributes" type="string[]">
+  Extra HTML attribute names to include in the simplified DOM string (e.g. `['aria-label', 'placeholder']`).
+</ParamField>
+
+<ParamField body="keepSemanticTags" type="boolean">
+  Preserve semantic HTML tag names (e.g. `<button>`, `<a>`) in the simplified output instead of normalising everything to generic element descriptors.
+</ParamField>
+
+<ParamField body="interactiveBlacklist" type="Element[]">
+  Elements to exclude from the interactive element index. Useful for hiding agent UI elements from the LLM's view of the page.
+</ParamField>
+
+---
+
+## The `BrowserState` Type
+
+`getBrowserState()` returns a `BrowserState` object. All fields are plain strings formatted for direct LLM consumption.
+
+<ResponseField name="url" type="string">
+  Current page URL (`window.location.href`).
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Current page title (`document.title`).
+</ResponseField>
+
+<ResponseField name="header" type="string">
+  Multi-line string containing the page title link, viewport/page dimensions, total scroll depth, and an above-fold scroll hint.
+
+  Example:
+  ```
+  Current Page: [My App](https://example.com/app)
+  Page info: 1440x900px viewport, 1440x2400px total page size, 0.0 pages above, 1.7 pages below, 2.7 total pages, at 0% of page
+
+  Interactive elements from top layer of the current page inside the viewport:
+
+  [Start of page]
+  ```
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  Simplified HTML of all indexed interactive elements, formatted for LLM consumption. Each interactive element is given a numeric index like `[42]` that maps to the internal `selectorMap`.
+</ResponseField>
+
+<ResponseField name="footer" type="string">
+  Below-fold scroll hint, or `[End of page]` when already at the bottom.
+
+  Example: `... 1500 pixels below (1.7 pages) - scroll to see more ...`
+</ResponseField>
+
+---
+
+## Methods
+
+### `getBrowserState()`
+
+```typescript
+controller.getBrowserState(): Promise<BrowserState>
+```
+
+Refreshes the DOM index (`updateTree()`) and returns the full `BrowserState` snapshot. This is the method the agent calls at the start of every observe phase. Elements blacklisted via `data-page-agent-not-interactive` or `interactiveBlacklist` are excluded from indexing.
+
+### `clickElement(index)`
+
+```typescript
+controller.clickElement(index: number): Promise<ActionResult>
+```
+
+Simulates a full W3C-compliant click sequence on the element at `index`: `pointerover` → `pointerenter` → `mouseover` → `mouseenter` → `pointerdown` → `mousedown` → `focus` → `pointerup` → `mouseup` → `click`. Automatically scrolls the element into view first.
+
+<ParamField body="index" type="number" required>
+  Zero-based interactive-element index from the most recent `getBrowserState()` call.
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: boolean, message: string }` — `message` contains a human-readable result including the element's text description, or an error string on failure.
+</ResponseField>
+
+<Note>
+  If the clicked element is an anchor with `target="_blank"`, the returned message will note that the link opened in a new tab.
+</Note>
+
+### `inputText(index, text)`
+
+```typescript
+controller.inputText(index: number, text: string): Promise<ActionResult>
+```
+
+Clicks the element at `index` then sets its value to `text`, dispatching the appropriate synthetic `input` / `change` events. Supports `<input>`, `<textarea>`, and `contenteditable` elements (including React-controlled inputs and most rich-text editors).
+
+<ParamField body="index" type="number" required>
+  Interactive-element index.
+</ParamField>
+
+<ParamField body="text" type="string" required>
+  Text to type into the element. Replaces any existing value.
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: boolean, message: string }`.
+</ResponseField>
+
+### `selectOption(index, text)`
+
+```typescript
+controller.selectOption(index: number, text: string): Promise<ActionResult>
+```
+
+Selects the `<option>` whose visible text matches `text` inside the `<select>` element at `index`, then dispatches a `change` event.
+
+<ParamField body="index" type="number" required>
+  Interactive-element index of the `<select>` element.
+</ParamField>
+
+<ParamField body="text" type="string" required>
+  Exact visible text of the option to select (whitespace-trimmed comparison).
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: boolean, message: string }`.
+</ResponseField>
+
+### `scroll(options)`
+
+```typescript
+controller.scroll(options: ScrollOptions): Promise<ActionResult>
+```
+
+Scrolls vertically. Without `index` it scrolls the page; with `index` it finds the nearest scrollable ancestor of the indexed element.
+
+<ParamField body="options" type="object" required>
+  <Expandable title="ScrollOptions fields">
+    <ParamField body="down" type="boolean" default="true">
+      `true` to scroll down, `false` to scroll up.
+    </ParamField>
+    <ParamField body="numPages" type="number" default="0.1">
+      Fraction of the viewport height to scroll. Ignored when `pixels` is provided.
+    </ParamField>
+    <ParamField body="pixels" type="number">
+      Exact pixel distance to scroll. Takes priority over `numPages`.
+    </ParamField>
+    <ParamField body="index" type="number">
+      Optional element index. When provided, scroll is applied to the nearest scrollable ancestor of that element.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: boolean, message: string }` with the actual pixels scrolled and whether a boundary (top/bottom) was reached.
+</ResponseField>
+
+### `scrollHorizontally(options)`
+
+```typescript
+controller.scrollHorizontally(options: HScrollOptions): Promise<ActionResult>
+```
+
+Scrolls horizontally. Without `index` it scrolls the page; with `index` it finds the nearest horizontally scrollable ancestor.
+
+<ParamField body="options" type="object" required>
+  <Expandable title="HScrollOptions fields">
+    <ParamField body="right" type="boolean" default="true">
+      `true` to scroll right, `false` to scroll left.
+    </ParamField>
+    <ParamField body="pixels" type="number" required>
+      Pixel distance to scroll.
+    </ParamField>
+    <ParamField body="index" type="number">
+      Optional element index for container-level scrolling.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: boolean, message: string }`.
+</ResponseField>
+
+### `executeJavascript(script, signal?)`
+
+```typescript
+controller.executeJavascript(script: string, signal?: AbortSignal): Promise<ActionResult>
+```
+
+Evaluates `script` in an async function scope on the current page. The `signal` is exposed to the script as a variable named `signal`, allowing cooperative cancellation of long-running async code.
+
+<ParamField body="script" type="string" required>
+  JavaScript source string. Supports `async`/`await`. Use `signal.throwIfAborted()` or pass `signal` to `fetch()` to honour cancellation.
+</ParamField>
+
+<ParamField body="signal" type="AbortSignal">
+  Optional abort signal forwarded into the script scope.
+</ParamField>
+
+<ResponseField name="returns" type="ActionResult">
+  `{ success: true, message: '✅ Executed JavaScript. Result: <returnValue>' }` or `{ success: false, message: '❌ Error executing JavaScript: <error>' }`.
+</ResponseField>
+
+<Warning>
+  `executeJavascript` is disabled by default in `PageAgentCore`. Enable it via `experimentalScriptExecutionTool: true`. It can have unpredictable side effects and may bypass data-masking mechanisms.
+</Warning>
+
+### `showMask()`
+
+```typescript
+controller.showMask(): Promise<void>
+```
+
+Displays the visual mask overlay, blocking pointer events from reaching the page. Waits for the mask to finish initialising before showing. No-op if `enableMask` was `false` at construction.
+
+### `hideMask()`
+
+```typescript
+controller.hideMask(): Promise<void>
+```
+
+Hides the visual mask overlay and restores pointer events to the page.
+
+### `cleanUpHighlights()`
+
+```typescript
+controller.cleanUpHighlights(): Promise<void>
+```
+
+Removes all element highlight overlays injected during the previous `updateTree()` call. Called automatically at the end of every agent task.
+
+### `getLastUpdateTime()`
+
+```typescript
+controller.getLastUpdateTime(): Promise<number>
+```
+
+Returns the Unix timestamp (milliseconds) of the most recent `updateTree()` call. The `wait` built-in tool uses this to subtract LLM call time from the requested wait duration.
+
+<ResponseField name="returns" type="Promise<number>">
+  `Date.now()` value from the last DOM tree refresh, or `0` if the tree has never been updated.
+</ResponseField>
+
+### `dispose()`
+
+```typescript
+controller.dispose(): void
+```
+
+Cleans up all internal state: removes highlight overlays, clears the element index and selector maps, and disposes the mask overlay. Called automatically by `PageAgentCore.dispose()`.
+
+---
+
+## Events
+
+`PageController` extends `EventTarget`.
+
+| Event | Type | When fired |
+|---|---|---|
+| `beforeUpdate` | `Event` | At the start of `updateTree()`, before DOM extraction begins. |
+| `afterUpdate` | `Event` | At the end of `updateTree()`, after the selector map is rebuilt. |
+
+---
+
+## Example
+
+```typescript
+import { PageController } from '@page-agent/page-controller'
+
+const controller = new PageController({ enableMask: true })
+
+// Get a snapshot of the current page
+const state = await controller.getBrowserState()
+console.log(state.url, state.title)
+console.log(state.content) // simplified HTML for LLM
+
+// Interact with indexed elements
+await controller.clickElement(3)
+await controller.inputText(5, 'Hello, world!')
+await controller.selectOption(7, 'Option B')
+
+// Scroll down half a viewport
+await controller.scroll({ down: true, numPages: 0.5 })
+
+// Execute JavaScript (only safe in controlled environments)
+await controller.executeJavascript(`
+  const el = document.querySelector('#banner')
+  if (el) el.remove()
+  return 'removed'
+`)
+
+// Clean up
+controller.dispose()
+```
+
+<Tip>
+  If you are integrating `PageController` with a custom agent, always call `getBrowserState()` (or `updateTree()`) before attempting any index-based action. Actions called before the DOM has been indexed throw `'DOM tree not indexed yet.'`.
+</Tip>
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PageAgent" icon="layout-panel-top" href="/api/page-agent">
+    Full agent with built-in panel — manages a PageController automatically.
+  </Card>
+  <Card title="PageAgentCore" icon="cpu" href="/api/page-agent-core">
+    Headless agent base class that accepts a PageController in its constructor.
+  </Card>
+</CardGroup>

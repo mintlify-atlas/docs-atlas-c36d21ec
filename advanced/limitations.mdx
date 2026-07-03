@@ -1,0 +1,159 @@
+---
+title: "Page Agent Limitations and Known Constraints"
+sidebarTitle: "Limitations"
+description: "Understand Page Agent's scope, DOM-only vision model, LLM dependency, performance profile, and security caveats before building production integrations."
+---
+
+Page Agent is purpose-built for client-side web enhancement inside a single-page application. It understands web pages through their DOM structure — not screenshots — and uses an LLM to reason and act. Understanding these architectural choices and their implications will help you design automations that succeed reliably and avoid surprises in edge cases.
+
+---
+
+## Scope Limitations
+
+### Single-page by default
+
+`PageAgent` (the JS library) operates within a single browser tab and is designed for SPAs. It cannot navigate between origins, open new tabs, or control the browser chrome.
+
+For multi-tab, multi-page, or cross-origin workflows you need the **Page Agent Chrome Extension** (`PageAgentExt`):
+
+| | PageAgent.js | PageAgentExt |
+|---|---|---|
+| **Integration** | Developer embeds the library | User installs the extension |
+| **Scope** | Current page (designed for SPAs) | Any web page, multi-tab |
+| **Extra capabilities** | — | Open / switch / close tabs |
+
+<Note>
+  Chrome Extension multi-page mode only works in normal browser windows. PWA windows, extension popup windows, and DevTools panels are not supported.
+</Note>
+
+### No access outside the browser
+
+Page Agent cannot interact with native desktop applications, the file system, or any API that is not reachable from the page's JavaScript context. It is strictly a browser-automation tool.
+
+---
+
+## LLM Dependency
+
+### Model capability requirements
+
+Page Agent relies entirely on the LLM's ability to reason about DOM structure and call tools correctly. Models with fewer than ~10 billion parameters — and many fine-tuned instruction models that lack strong tool-call support — will produce unreliable or broken results.
+
+**Recommended models:** GPT-4.1 / GPT-5.x class, Claude 3.5 Haiku and above, or other frontier models with verified `tool_use` / `function_calling` support.
+
+### Success rate vs. page complexity
+
+Automation success is probabilistic. Factors that reduce success rate:
+
+- **Ambiguous task descriptions** — vague language leads to misinterpretation.
+- **Deep nesting / unusual layouts** — non-standard component hierarchies are harder to reason about.
+- **Rapidly changing DOM** — elements that appear and disappear within a single step cycle may be missed.
+- **Counter-intuitive interactions** — patterns like "click the label to check the checkbox" are hard to infer from DOM alone.
+
+### Context window consumption
+
+Each step attaches the current simplified HTML, full agent history, and system instructions to the prompt. On content-heavy pages this can easily exceed **15,000 tokens per step**. For long tasks (many steps) the accumulated history can push total usage significantly higher. Consider setting `maxSteps` conservatively and enabling prompt caching if your provider supports it.
+
+---
+
+## DOM Manipulation Constraints
+
+### Text-based extraction only
+
+Page Agent does **not** use multimodal vision. It reads pages through their DOM structure only. The following content types are invisible to the agent:
+
+- `<canvas>` and WebGL rendering
+- SVG elements without accessible text or ARIA labels
+- Images without descriptive `alt` text
+- CSS-only visual affordances (e.g., a pseudo-element that looks like a button)
+
+Semantic HTML and good accessibility attributes (`role`, `aria-label`, `aria-expanded`) directly improve the agent's accuracy.
+
+### Supported interaction types
+
+<CardGroup cols={2}>
+  <Card title="Supported" icon="check">
+    - Click, text input, dropdown select
+    - Vertical and horizontal scroll
+    - Form submit and focus events
+    - Same-origin iframes (single level only)
+    - Execute JavaScript (opt-in via `experimentalScriptExecutionTool`)
+  </Card>
+  <Card title="Not Supported" icon="xmark">
+    - Hover, drag-and-drop, right-click
+    - Keyboard shortcuts
+    - Coordinate / pixel-based targeting
+    - Nested or cross-origin iframes
+    - Canvas drawing
+    - Editors like Monaco or CodeMirror (require JS instance access)
+  </Card>
+</CardGroup>
+
+### Shadow DOM and web components
+
+Elements inside a shadow root are not visible to the default DOM extractor. Custom web components that encapsulate their internals behind a closed shadow root will appear as opaque containers. In some cases `experimentalScriptExecutionTool` can work around this by querying `shadowRoot` directly.
+
+---
+
+## Performance
+
+### LLM latency per step
+
+Every step makes exactly one LLM API call. Total task time is roughly:
+
+```
+total_time ≈ (number_of_steps × LLM_latency) + (step_delay × steps)
+```
+
+For a 10-step task with 2 s average LLM latency and the default 0.4 s step delay:
+
+```
+≈ (10 × 2s) + (0.4s × 10) = 24 seconds
+```
+
+Use `stepDelay: 0` to eliminate inter-step pauses if the target page does not need settling time.
+
+### Default step limit
+
+`maxSteps` defaults to `40`. Complex multi-screen workflows — form wizards, multi-step checkouts, data-entry pipelines — can hit this limit. Increase it intentionally and monitor token usage:
+
+```typescript
+const agent = new PageAgent({
+  // ...
+  maxSteps: 80,
+})
+```
+
+The agent emits a warning in the history at 5 steps remaining and a critical warning at 2 steps remaining.
+
+---
+
+## Security Caveats
+
+<Warning>
+  Page Agent runs with the full permissions of the host page's JavaScript context. There is no sandbox boundary between the agent and the application.
+</Warning>
+
+Key security considerations to keep in mind:
+
+1. **Full JS context access** — The agent can read and modify any variable, DOM node, or cookie accessible to your page script. Combine `interactiveBlacklist`, `instructions.system`, and `transformPageContent` to establish explicit boundaries. See [Security & Permissions](/advanced/security-permissions) for full guidance.
+
+2. **Prompt injection** — Untrusted page content (ads, user-generated content, hidden text) can attempt to override agent instructions. Use strict `instructions.system` rules and `transformPageContent` to sanitize page content before it reaches the model.
+
+3. **API key exposure** — Never embed your LLM API key directly in client-side code. Use `customFetch` to route requests through a backend proxy that injects the key server-side.
+
+---
+
+## Experimental Features
+
+The following APIs are unstable and may change or be removed without a major version bump:
+
+| Feature | Config Option | Risk |
+|---|---|---|
+| JavaScript execution | `experimentalScriptExecutionTool: true` | Can execute arbitrary code; bypasses `transformPageContent` masking |
+| LLMs.txt context | `experimentalLlmsTxt: true` | Network request to `/llms.txt`; contents are injected verbatim into the prompt |
+| Lifecycle hooks | `onBeforeStep`, `onAfterStep`, etc. | API signature may change; errors propagate out of `execute()` |
+| Custom tools | `customTools` | Tool schema validation and execution context may change |
+
+<Tip>
+  Subscribe to the [GitHub releases page](https://github.com/alibaba/page-agent/releases) to stay informed of breaking changes to experimental APIs.
+</Tip>

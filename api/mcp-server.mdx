@@ -1,0 +1,195 @@
+---
+title: "@page-agent/mcp — MCP Server API Reference"
+sidebarTitle: "MCP Server"
+description: "Reference for @page-agent/mcp: MCP tools (execute_task, get_status, stop_task), environment variables, WebSocket protocol, and Claude Desktop setup."
+---
+
+`@page-agent/mcp` is a Node.js MCP server that exposes three tools for controlling the browser through the Page Agent extension. It communicates with AI agent clients (Claude Desktop, Cursor, GitHub Copilot) via the stdio MCP protocol, and bridges to the browser extension through a local HTTP + WebSocket server. No separate installation is required — `npx` fetches and runs the package on demand.
+
+<Note>
+  **Beta.** The MCP tool interface and WebSocket protocol may change between minor versions. Pin to a specific version in production by replacing `-y @page-agent/mcp` with `-y @page-agent/mcp@x.y.z`.
+</Note>
+
+## Prerequisites
+
+- **Node.js >= 20** on the machine running the MCP server
+- **Page Agent Chrome extension** installed and authorized in your browser — [install from Chrome Web Store](https://chromewebstore.google.com/detail/page-agent-ext/akldabonmimlicnjlflnapfeklbfemhj)
+- An **OpenAI-compatible LLM API key** (or a locally running model)
+
+---
+
+## Installation & Client Configuration
+
+Add the following block to your MCP client's configuration file. The server is started automatically by the client via `npx`.
+
+### Claude Desktop
+
+File path: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows).
+
+```json
+{
+  "mcpServers": {
+    "page-agent": {
+      "command": "npx",
+      "args": ["-y", "@page-agent/mcp"],
+      "env": {
+        "LLM_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "LLM_API_KEY": "sk-xxx",
+        "LLM_MODEL_NAME": "qwen3.5-plus"
+      }
+    }
+  }
+}
+```
+
+### Cursor / GitHub Copilot
+
+Use the same JSON structure in your client's MCP settings panel. The `command`, `args`, and `env` keys are identical across all MCP-compatible clients.
+
+---
+
+## MCP Tools
+
+### `execute_task`
+
+Execute a browser automation task in natural language. This tool is **blocking** — it waits for the agent to complete or fail before returning.
+
+<ParamField path="task" type="string" required>
+  Natural language description of the task. Be specific: include step-by-step instructions and the information you want the agent to return after completing the task.
+
+  ```
+  Go to github.com/alibaba/page-agent, open the Issues tab, and return the title and number of the three most recently opened issues.
+  ```
+</ParamField>
+
+**Returns:** A text content block containing either:
+
+```
+Task completed.
+
+<agent final response>
+```
+
+or, on failure:
+
+```
+Task failed.
+
+<error or partial result>
+```
+
+---
+
+### `get_status`
+
+Check whether the hub tab is connected and whether a task is currently running. Useful for polling before calling `execute_task`.
+
+**Input:** none
+
+**Returns:**
+
+```json
+{
+  "connected": true,
+  "busy": false
+}
+```
+
+<ResponseField name="connected" type="boolean">
+  `true` when the hub tab in the browser has an active WebSocket connection to the MCP server.
+</ResponseField>
+
+<ResponseField name="busy" type="boolean">
+  `true` when a task is currently executing. Calling `execute_task` while `busy` is `true` will throw an error.
+</ResponseField>
+
+---
+
+### `stop_task`
+
+Send a stop signal to the currently running task. The agent finishes its current tool call then halts gracefully.
+
+**Input:** none
+
+**Returns:** `"Stop signal sent."`
+
+---
+
+## Environment Variables
+
+<ParamField path="LLM_BASE_URL" type="string" required>
+  Base URL of the OpenAI-compatible LLM API. Forwarded to the agent running inside the hub tab.
+
+  Examples: `https://api.openai.com/v1`, `https://dashscope.aliyuncs.com/compatible-mode/v1`, `http://localhost:11434/v1`
+</ParamField>
+
+<ParamField path="LLM_API_KEY" type="string" required>
+  API key for the LLM provider. Omit or leave empty for local runtimes that do not require authentication.
+</ParamField>
+
+<ParamField path="LLM_MODEL_NAME" type="string" required>
+  Model identifier exactly as the provider expects it. Examples: `gpt-4.1-mini`, `qwen3.5-plus`, `qwen3:14b`.
+</ParamField>
+
+<ParamField path="PORT" type="number" default="38401">
+  Port for the local HTTP server and WebSocket endpoint. Change this if `38401` is already in use on your machine.
+</ParamField>
+
+---
+
+## How It Works
+
+```
+┌──────────────┐  stdio   ┌──────────────────┐  WebSocket   ┌──────────────┐
+│ Claude /     │◄────────►│ @page-agent/mcp  │◄────────────►│ Hub tab      │
+│ Copilot      │  (MCP)   │ (Node.js)        │  (localhost) │ (extension)  │
+└──────────────┘          └──────────────────┘              └──────┬───────┘
+                                   │                               │
+                                   │ HTTP                          │ useAgent
+                                   ▼                               ▼
+                          ┌──────────────────┐              ┌──────────────┐
+                          │ Launcher page    │              │ MultiPage    │
+                          │ (localhost:PORT) │              │ Agent        │
+                          └──────────────────┘              └──────────────┘
+```
+
+1. **Startup** — The MCP client starts `@page-agent/mcp` as a child process. The server binds an HTTP + WebSocket endpoint on `localhost:PORT` and opens the launcher page (`http://localhost:PORT`) in the system browser.
+2. **Hub connection** — The launcher page detects the extension and tells it to open the **hub tab** (`hub.html?ws=PORT`). The hub tab connects back to the WebSocket server.
+3. **Task execution** — When the MCP client calls `execute_task`, the server sends a `{ type: "execute", task, config }` message over the WebSocket to the hub tab. The hub runs the agent and sends back a `{ type: "result", success, data }` message when done.
+4. **Stopping** — `stop_task` sends `{ type: "stop" }` over the WebSocket. The hub signals the running agent to abort.
+
+The hub tab speaks a generic WebSocket protocol and has no direct knowledge of MCP — the server acts purely as a bridge.
+
+---
+
+## Error Handling
+
+| Scenario | Behaviour |
+|---|---|
+| Hub not connected | `execute_task` throws `"Hub is not connected. Is the extension running?"` |
+| Task already running | `execute_task` throws `"Agent is already running a task."` |
+| Hub disconnects mid-task | The pending promise rejects with `"Hub disconnected while task was running"` |
+| Port already in use | Server exits with `"Port <N> is in use. Another Page Agent MCP server may be running."` |
+
+---
+
+## Development
+
+Inspect the MCP server interactively using the Model Context Protocol Inspector:
+
+```bash
+# From the repository root
+npm run dev:ext
+
+# In a separate terminal
+npx @modelcontextprotocol/inspector node packages/mcp/src/index.js
+```
+
+The source is pure ESM JavaScript with no build step — the files in `src/` are the published artifacts.
+
+```
+packages/mcp/src/
+├── index.js        # CLI entry: MCP server (stdio) + opens launcher page
+├── hub-bridge.js   # HTTP server + WebSocket bridge to hub tab
+└── launcher.html   # Bootstrap page: detects extension, triggers hub open
+```

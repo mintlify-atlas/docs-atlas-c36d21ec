@@ -1,0 +1,217 @@
+---
+title: "AgentConfig — Full Configuration Reference"
+sidebarTitle: "AgentConfig"
+description: "Complete reference for all AgentConfig options: LLM settings, language, step limits, custom tools, instructions, lifecycle hooks, and experimental flags."
+---
+
+`AgentConfig` is the primary configuration interface for both `PageAgent` and `PageAgentCore`. It extends `LLMConfig` and covers every behavioral, lifecycle, and capability option available when constructing an agent instance. All LLM connection fields are inherited directly — there is no need to pass a separate config object.
+
+## LLM Connection Fields
+
+These fields are inherited from `LLMConfig` and control how the agent communicates with the LLM backend.
+
+<ParamField path="baseURL" type="string" required>
+  Base URL of the OpenAI-compatible LLM API endpoint. Examples: `https://api.openai.com/v1`, `http://localhost:11434/v1`.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  Model identifier as accepted by the provider, for example `gpt-4.1-mini`, `qwen3.5-plus`, or `qwen3:14b`.
+</ParamField>
+
+<ParamField path="apiKey" type="string">
+  API key for the LLM provider. Omit for local runtimes (Ollama, LM Studio) or when authentication is handled by `customFetch`.
+</ParamField>
+
+<ParamField path="maxRetries" type="number">
+  Number of times the agent will retry a failed LLM call before propagating an error. Defaults to `3`.
+</ParamField>
+
+<ParamField path="disableNamedToolChoice" type="boolean">
+  When `true`, removes the `tool_choice` field from every LLM request. Required for LM Studio and other local models that reject named tool choice with `"Invalid tool_choice type: 'object'"`.
+</ParamField>
+
+<ParamField path="transformRequestBody" type="(body: Record<string, unknown>) => Record<string, unknown> | undefined">
+  Intercept and transform the final request body before it is sent to the provider. Return a new object, or mutate the input and return `undefined`. Typical use cases include adding prompt-caching hints or provider-specific flags.
+
+  ```typescript
+  transformRequestBody: (body) => ({
+    ...body,
+    cache_control: { type: 'ephemeral' },
+  })
+  ```
+</ParamField>
+
+<ParamField path="customFetch" type="typeof globalThis.fetch">
+  Custom `fetch` implementation for all LLM API requests. Use this to inject authentication headers, route traffic through a backend proxy, or override CORS behaviour in browser environments.
+
+  ```typescript
+  customFetch: (url, init) =>
+    fetch(url, { ...init, credentials: 'include' })
+  ```
+</ParamField>
+
+## Agent Behaviour Fields
+
+<ParamField path="language" type="'en-US' | 'zh-CN'" default="'en-US'">
+  UI language for agent-generated messages and prompts. Currently supports English (`en-US`) and Simplified Chinese (`zh-CN`).
+</ParamField>
+
+<ParamField path="maxSteps" type="number" default="40">
+  Maximum number of tool-call steps the agent may execute for a single task. The agent stops and returns an error result if this limit is reached before the task is marked done.
+</ParamField>
+
+<ParamField path="stepDelay" type="number" default="0.4">
+  Minimum pause between consecutive steps, in seconds. Increase this value to slow the agent down on pages that animate or load data asynchronously.
+</ParamField>
+
+<ParamField path="customTools" type="Record<string, PageAgentTool | null>">
+  Extend or override the agent's built-in tool set. Keys are tool names; values are `PageAgentTool` objects or `null` to remove a built-in tool entirely.
+
+  <Expandable title="Examples">
+    ```typescript
+    import { z } from 'zod/v4'
+    import { tool } from 'page-agent'
+
+    // Override the built-in ask_user tool
+    const customTools = {
+      ask_user: tool({
+        description: 'Ask the user a question and wait for their answer.',
+        inputSchema: z.object({ question: z.string() }),
+        execute: async function (input) {
+          const answer = await myCustomDialog(input.question)
+          return '✅ Received user answer: ' + answer
+        },
+      }),
+    }
+
+    // Disable the ask_user tool entirely
+    const customTools = {
+      ask_user: null,
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<ParamField path="instructions" type="object">
+  Instructions that guide agent behaviour across all tasks or on specific pages.
+
+  <Expandable title="instructions fields">
+    <ParamField path="instructions.system" type="string">
+      Global system-level instructions appended to every task prompt. Applied once per task.
+    </ParamField>
+
+    <ParamField path="instructions.getPageInstructions" type="(url: string) => string | undefined | null">
+      Dynamic callback invoked before each step. Receives the current page URL (`window.location.href`) and returns a string of page-specific instructions, or `undefined`/`null` to skip injection for that page.
+
+      ```typescript
+      instructions: {
+        getPageInstructions: (url) => {
+          if (url.includes('/checkout')) {
+            return 'Never submit payment forms without explicit user confirmation.'
+          }
+        },
+      }
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="transformPageContent" type="(content: string) => string | Promise<string>">
+  Transform the simplified page content after DOM extraction but before it is sent to the LLM. Use this to inspect extraction output, inject additional context, or mask sensitive data.
+
+  ```typescript
+  // Mask Chinese phone numbers before sending to LLM
+  transformPageContent: async (content) => {
+    return content.replace(/1[3-9]\d{9}/g, '***********')
+  }
+  ```
+</ParamField>
+
+<ParamField path="customSystemPrompt" type="string">
+  Completely replaces the default system prompt. Use with caution — an incorrect prompt can break agent reasoning and tool-call behaviour.
+</ParamField>
+
+<ParamField path="experimentalScriptExecutionTool" type="boolean" default="false">
+  Enables the `execute_javascript` tool, which lets the agent run LLM-generated JavaScript directly on the page. Can cause unpredictable side effects and may bypass data-masking applied by `transformPageContent`.
+</ParamField>
+
+<ParamField path="experimentalLlmsTxt" type="boolean" default="false">
+  When `true`, the agent fetches `/llms.txt` from the current site origin and includes its contents as additional context. Fetched at most once per origin per task.
+</ParamField>
+
+## Lifecycle Hooks
+
+<Note>
+  All lifecycle hooks are **experimental**. Their signatures may change in future minor versions without a deprecation period.
+</Note>
+
+<ParamField path="onBeforeTask" type="(agent: PageAgentCore) => void | Promise<void>">
+  Called once immediately before task execution begins. Receives the `PageAgentCore` instance. Useful for resetting UI state or injecting observations before the first step.
+</ParamField>
+
+<ParamField path="onAfterTask" type="(agent: PageAgentCore, result: ExecutionResult) => void | Promise<void>">
+  Called once after task execution completes, regardless of success or failure. Receives the final `ExecutionResult`.
+</ParamField>
+
+<ParamField path="onBeforeStep" type="(agent: PageAgentCore, stepCount: number) => void | Promise<void>">
+  Called before each individual step. `stepCount` is zero-indexed. Use this to inject per-step observations or enforce custom pause logic.
+</ParamField>
+
+<ParamField path="onAfterStep" type="(agent: PageAgentCore, history: HistoricalEvent[]) => void | Promise<void>">
+  Called after each step completes. Receives the full history array up to and including the step that just finished. Suitable for streaming progress to external systems.
+</ParamField>
+
+<ParamField path="onDispose" type="(agent: PageAgentCore, reason?: string) => void">
+  Called when the agent instance is disposed. Receives an optional reason string. If the hook is async, disposal will wait for it to settle.
+</ParamField>
+
+## Full TypeScript Interface
+
+```typescript
+import type { LLMConfig } from '@page-agent/llms'
+import type { PageAgentCore } from '@page-agent/core'
+import type { PageAgentTool } from '@page-agent/core'
+
+export interface AgentConfig extends LLMConfig {
+  // --- Inherited from LLMConfig ---
+  baseURL: string
+  model: string
+  apiKey?: string
+  maxRetries?: number
+  disableNamedToolChoice?: boolean
+  transformRequestBody?: (
+    body: Record<string, unknown>
+  ) => Record<string, unknown> | undefined
+  customFetch?: typeof globalThis.fetch
+
+  // --- Agent behaviour ---
+  language?: 'en-US' | 'zh-CN'
+  maxSteps?: number
+  stepDelay?: number
+  customTools?: Record<string, PageAgentTool | null>
+  instructions?: {
+    system?: string
+    getPageInstructions?: (url: string) => string | undefined | null
+  }
+  transformPageContent?: (content: string) => Promise<string> | string
+  customSystemPrompt?: string
+  experimentalScriptExecutionTool?: boolean
+  experimentalLlmsTxt?: boolean
+
+  // --- Lifecycle hooks (experimental) ---
+  onBeforeTask?: (agent: PageAgentCore) => Promise<void> | void
+  onAfterTask?: (
+    agent: PageAgentCore,
+    result: ExecutionResult
+  ) => Promise<void> | void
+  onBeforeStep?: (
+    agent: PageAgentCore,
+    stepCount: number
+  ) => Promise<void> | void
+  onAfterStep?: (
+    agent: PageAgentCore,
+    history: HistoricalEvent[]
+  ) => Promise<void> | void
+  onDispose?: (agent: PageAgentCore, reason?: string) => void
+}
+```

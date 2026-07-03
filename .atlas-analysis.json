@@ -1,0 +1,114 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Page Agent",
+  "projectDescription": "A purely web-based GUI Agent library that lets you control web interfaces with natural language — no browser extensions, Python, or headless browsers required.",
+  "theme": "luma",
+  "primaryColor": "#6366F1",
+  "lightColor": "#EEF2FF",
+  "darkColor": "#312E81",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "troubleshooting"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/models",
+              "features/custom-instructions",
+              "features/custom-tools",
+              "features/data-masking",
+              "features/chrome-extension",
+              "features/mcp-server"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/page-agent-core",
+              "advanced/page-controller",
+              "advanced/custom-ui",
+              "advanced/security-permissions",
+              "advanced/limitations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Classes",
+            "pages": [
+              "api/page-agent",
+              "api/page-agent-core",
+              "api/page-controller"
+            ]
+          },
+          {
+            "group": "Types & Config",
+            "pages": [
+              "api/agent-config",
+              "api/types",
+              "api/llm-config"
+            ]
+          },
+          {
+            "group": "Extension & MCP",
+            "pages": [
+              "api/extension-api",
+              "api/mcp-server"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "In-page JavaScript agent — no browser extension, Python, or headless browser needed",
+    "Text-based DOM manipulation — no screenshots, no multimodal LLMs required",
+    "Bring-your-own LLM via any OpenAI-compatible endpoint",
+    "Custom tools via Zod schemas to extend agent capabilities with your own business logic",
+    "Data masking via transformPageContent hook to protect sensitive user data",
+    "Custom instructions (system-level and per-page) to guide agent behavior",
+    "Chrome Extension for multi-page, multi-tab browser automation tasks",
+    "MCP Server (Beta) to control the browser from Claude Desktop, Cursor, and other agent clients",
+    "Lifecycle hooks: onBeforeTask, onAfterTask, onBeforeStep, onAfterStep, onDispose",
+    "Re-Act agent loop with reflection-before-action mental model"
+  ],
+  "publicApiSurface": [
+    "new PageAgent(config: PageAgentConfig)",
+    "agent.execute(task: string): Promise<ExecutionResult>",
+    "agent.stop(): Promise<void>",
+    "agent.dispose(): void",
+    "agent.status: AgentStatus",
+    "agent.history: HistoricalEvent[]",
+    "agent.lastResult: ExecutionResult | null",
+    "agent.onAskUser: (question, options) => Promise<string>",
+    "agent.pushObservation(content: string): void",
+    "new PageAgentCore(config: PageAgentCoreConfig)",
+    "new PageController(config: PageControllerConfig)",
+    "tool(options: PageAgentTool): PageAgentTool",
+    "window.PAGE_AGENT_EXT.execute(task, config): Promise<ExecutionResult>",
+    "window.PAGE_AGENT_EXT.stop(): void",
+    "AgentConfig.customTools",
+    "AgentConfig.instructions.system",
+    "AgentConfig.instructions.getPageInstructions",
+    "AgentConfig.transformPageContent",
+    "AgentConfig.customSystemPrompt",
+    "AgentConfig.experimentalScriptExecutionTool",
+    "AgentConfig.experimentalLlmsTxt",
+    "AgentConfig.maxSteps",
+    "AgentConfig.stepDelay",
+    "LLMConfig.baseURL / model / apiKey / customFetch / transformRequestBody / disableNamedToolChoice",
+    "MCP tools: execute_task, get_status, stop_task"
+  ]
+}

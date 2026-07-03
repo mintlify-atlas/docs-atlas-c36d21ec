@@ -1,0 +1,160 @@
+---
+title: "Extend Page Agent with Custom Tools"
+sidebarTitle: "Custom Tools"
+description: "Register Zod-typed custom tools to give Page Agent access to your business APIs, override built-in tools, or remove tools the agent should never use."
+---
+
+Page Agent's tool system is fully extensible. By providing a `customTools` map at construction time, you can add new capabilities backed by your own business logic, override the behavior of built-in tools, or remove tools entirely. Each tool's input schema is defined with Zod, giving you compile-time safety and automatic validation.
+
+## Zod Version Note
+
+Page Agent uses Zod for tool input schemas. Both **Zod 3** (≥ 3.25.0) and **Zod 4** are supported. Always import from the `zod/v4` subpath regardless of which version you have installed. **Zod Mini is not supported.**
+
+```typescript
+// Zod 3 (>=3.25.0) or Zod 4
+import { z } from 'zod/v4'
+```
+
+## Defining a Custom Tool
+
+Use the `tool()` helper exported from `page-agent` to define each tool. Every tool requires three fields:
+
+<ParamField path="description" type="string" required>
+  A clear description of what the tool does. The LLM uses this to decide when to call it — write it as you would a docstring for a human reader.
+</ParamField>
+
+<ParamField path="inputSchema" type="ZodObject" required>
+  A Zod object schema describing the tool's input parameters. Defaults and optional fields are respected.
+</ParamField>
+
+<ParamField path="execute" type="async function" required>
+  The function called when the LLM invokes the tool. Receives the validated `input` and a context object `{ signal }`. Must return a string result. `this` inside `execute` is the `PageAgentCore` instance.
+</ParamField>
+
+```typescript
+import { z } from 'zod/v4'
+import { PageAgent, tool } from 'page-agent'
+
+const pageAgent = new PageAgent({
+  customTools: {
+    add_to_cart: tool({
+      description: 'Add a product to the shopping cart by its product ID.',
+      inputSchema: z.object({
+        productId: z.string(),
+        quantity: z.number().min(1).default(1),
+      }),
+      execute: async function (input, { signal }) {
+        await fetch('/api/cart', {
+          method: 'POST',
+          body: JSON.stringify(input),
+          signal, // honor cancellation
+        })
+        return `Added ${input.quantity}x ${input.productId} to cart.`
+      },
+    }),
+
+    search_knowledge_base: tool({
+      description: 'Search the internal knowledge base and return relevant articles.',
+      inputSchema: z.object({
+        query: z.string(),
+        limit: z.number().max(10).default(3),
+      }),
+      execute: async function (input, { signal }) {
+        const res = await fetch(
+          `/api/kb?q=${encodeURIComponent(input.query)}&limit=${input.limit}`,
+          { signal }
+        )
+        const articles = await res.json()
+        return JSON.stringify(articles)
+      },
+    }),
+  },
+})
+```
+
+<Tip>
+  Always pass `signal` to any `fetch` or async operation inside `execute`. This enables cooperative cancellation when `pageAgent.stop()` is called or the task times out.
+</Tip>
+
+## Overriding a Built-in Tool
+
+Pass a tool with the **same name** as a built-in tool to replace its implementation entirely. The original behavior is discarded.
+
+```typescript
+const pageAgent = new PageAgent({
+  customTools: {
+    // Replace the built-in ask_user with your own dialog
+    ask_user: tool({
+      description: 'Ask the user a question and wait for their answer.',
+      inputSchema: z.object({
+        question: z.string(),
+      }),
+      execute: async function (input) {
+        const answer = await showAppDialog(input.question)
+        return `User answered: ${answer}`
+      },
+    }),
+  },
+})
+```
+
+## Removing a Built-in Tool
+
+Set a tool's value to `null` to prevent the agent from ever calling it:
+
+```typescript
+const pageAgent = new PageAgent({
+  customTools: {
+    scroll: null,              // agent can no longer scroll
+    execute_javascript: null,  // remove script execution capability
+  },
+})
+```
+
+<Note>
+  Removing tools is useful when you want to restrict the agent's action space — for example, removing `ask_user` forces the agent to complete tasks without asking for clarification.
+</Note>
+
+## Execute Context
+
+Inside every `execute` function:
+
+| Context | Type | Description |
+|---|---|---|
+| `this` | `PageAgentCore` | The agent instance. Access agent state, history, and internal APIs. |
+| `ctx.signal` | `AbortSignal` | Fires when the task is cancelled. Pass to `fetch` and other async ops. |
+
+## Built-in Tools Reference
+
+These tools are available by default. Override or remove them via `customTools`.
+
+| Tool | Description |
+|---|---|
+| `done` | Mark the task as complete and return a result to the caller. |
+| `wait` | Pause execution for a specified duration. |
+| `ask_user` | Ask the user a question and wait for their typed reply. |
+| `click_element_by_index` | Click a DOM element identified by its index in the simplified page tree. |
+| `input_text` | Type text into a focused input or textarea element. |
+| `select_dropdown_option` | Choose an option in a `<select>` element. |
+| `scroll` | Scroll the page or a scrollable container vertically. |
+| `scroll_horizontally` | Scroll the page or a container horizontally. |
+| `execute_javascript` | Execute a JavaScript snippet on the page. **Experimental — disabled by default.** |
+
+### The `execute_javascript` Tool
+
+The `execute_javascript` tool is opt-in and disabled unless you explicitly enable it:
+
+```typescript
+const pageAgent = new PageAgent({
+  experimentalScriptExecutionTool: true,
+})
+```
+
+<Warning>
+  `execute_javascript` grants the agent the ability to run arbitrary JavaScript on the page. This can:
+  - Cause unpredictable side effects
+  - **Bypass `transformPageContent` data masking** — sensitive DOM content may be read directly
+  - Be used to exfiltrate data if the agent is manipulated
+
+  Only enable this tool in controlled environments where you fully trust the task inputs.
+</Warning>

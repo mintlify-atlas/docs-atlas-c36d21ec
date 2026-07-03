@@ -1,0 +1,327 @@
+---
+title: "PageAgent Class — Full API Reference"
+sidebarTitle: "PageAgent"
+description: "Complete API reference for PageAgent — the main entry point of the page-agent package that extends PageAgentCore with a built-in floating UI panel."
+---
+
+`PageAgent` is the main entry point exported from the `page-agent` npm package. It extends [`PageAgentCore`](/api/page-agent-core) with a built-in floating UI panel that is automatically injected into the page, giving your users a visible, interactive control surface without any additional setup. Because `PageAgent` re-exports everything from `@page-agent/core`, you only need a single import for the vast majority of use cases.
+
+## Installation & Import
+
+```bash
+npm install page-agent
+```
+
+```typescript
+import { PageAgent } from 'page-agent'
+```
+
+## Constructor
+
+```typescript
+new PageAgent(config: PageAgentConfig)
+```
+
+`PageAgentConfig` is a merged type that combines all fields from `AgentConfig`, `PageControllerConfig`, and `PanelConfig` (minus `language`, which is promoted to the top level):
+
+```typescript
+type PageAgentConfig = AgentConfig & PageControllerConfig & Omit<PanelConfig, 'language'>
+```
+
+Internally the constructor creates a `PageController` (with `enableMask` defaulting to `true`) and a `Panel`, then passes both to `PageAgentCore`. You never need to instantiate those classes yourself when using `PageAgent`.
+
+### LLM Connection
+
+<ParamField body="baseURL" type="string" required>
+  OpenAI-compatible LLM API base URL, e.g. `https://api.openai.com/v1`.
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Model name to use, e.g. `gpt-4o` or `qwen-max`.
+</ParamField>
+
+<ParamField body="apiKey" type="string">
+  API key for the LLM provider. Can be omitted if the key is injected by a proxy or middleware.
+</ParamField>
+
+### Agent Behaviour
+
+<ParamField body="language" type="'en-US' | 'zh-CN'" default="'en-US'">
+  UI language for the built-in panel and the agent's default working language in the system prompt.
+</ParamField>
+
+<ParamField body="maxSteps" type="number" default="40">
+  Maximum number of Re-Act loop iterations per task. The agent forcibly terminates and returns a failed result when the limit is reached.
+</ParamField>
+
+<ParamField body="stepDelay" type="number" default="0.4">
+  Delay in seconds between consecutive steps. A small pause helps pages stabilise after DOM mutations.
+</ParamField>
+
+<ParamField body="enableMask" type="boolean" default="true">
+  Show a visual overlay that blocks user interaction while the agent is operating. Set to `false` to allow simultaneous user input.
+</ParamField>
+
+<ParamField body="customTools" type="Record<string, PageAgentTool | null>">
+  Add, override, or remove built-in tools.
+
+  <Expandable title="Details">
+    Pass a map of tool names to `PageAgentTool` objects (created with the exported `tool()` helper) to register new tools or replace existing ones. Set a value to `null` to **remove** a built-in tool entirely (e.g. `{ ask_user: null }`).
+
+    Built-in tools: `done`, `wait`, `ask_user`, `click_element_by_index`, `input_text`, `select_dropdown_option`, `scroll`, `scroll_horizontally`. The `execute_javascript` tool is only active when `experimentalScriptExecutionTool` is `true`.
+  </Expandable>
+</ParamField>
+
+<ParamField body="instructions" type="object">
+  Static and dynamic instructions injected into every LLM prompt.
+
+  <Expandable title="Properties">
+    <ParamField body="system" type="string">
+      Global system-level instructions applied to all tasks.
+    </ParamField>
+
+    <ParamField body="getPageInstructions" type="(url: string) => string | undefined | null">
+      Dynamic callback invoked before each step. Return a string for the current URL, or `undefined` / `null` to skip.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="transformPageContent" type="(content: string) => Promise<string> | string">
+  Transform the simplified DOM content string before it is sent to the LLM. Use this to inspect extraction results, add annotations, or mask sensitive data.
+
+  ```typescript
+  // Mask phone numbers before sending to LLM
+  transformPageContent: (content) =>
+    content.replace(/1[3-9]\d{9}/g, '***********')
+  ```
+</ParamField>
+
+<ParamField body="customSystemPrompt" type="string">
+  Completely replace the default system prompt. Use with caution — an incorrect prompt will break agent behaviour.
+</ParamField>
+
+### Experimental Options
+
+<ParamField body="experimentalScriptExecutionTool" type="boolean" default="false">
+  Enable the `execute_javascript` tool, which lets the LLM run arbitrary JavaScript on the page. Can bypass safety guards and data-masking mechanisms.
+</ParamField>
+
+<ParamField body="experimentalLlmsTxt" type="boolean" default="false">
+  Fetch `/llms.txt` from the current site origin once per task and include its content as LLM context.
+</ParamField>
+
+### Panel
+
+<ParamField body="promptForNextTask" type="boolean" default="true">
+  When `true`, the panel's task input is shown again after a task completes so users can immediately issue a follow-up task.
+</ParamField>
+
+### Lifecycle Hooks
+
+<ParamField body="onBeforeTask" type="(agent: PageAgentCore) => Promise<void> | void">
+  Called once before task execution begins. Throwing inside this hook cancels the task and propagates the error to the `execute()` caller.
+</ParamField>
+
+<ParamField body="onAfterTask" type="(agent: PageAgentCore, result: ExecutionResult) => Promise<void> | void">
+  Called once after task execution completes (whether successful or not).
+</ParamField>
+
+<ParamField body="onBeforeStep" type="(agent: PageAgentCore, stepCount: number) => Promise<void> | void">
+  Called before each Re-Act step. `stepCount` is 0-indexed.
+</ParamField>
+
+<ParamField body="onAfterStep" type="(agent: PageAgentCore, history: HistoricalEvent[]) => Promise<void> | void">
+  Called after each Re-Act step with the current history snapshot.
+</ParamField>
+
+<ParamField body="onDispose" type="(agent: PageAgentCore, reason?: string) => void">
+  Called synchronously when the agent is disposed. Useful for cleanup or logging.
+</ParamField>
+
+---
+
+## Properties
+
+<ResponseField name="panel" type="Panel">
+  The built-in floating UI panel instance injected into the page. Use `panel.show()`, `panel.hide()`, `panel.expand()`, or `panel.collapse()` for programmatic control.
+</ResponseField>
+
+<ResponseField name="status" type="AgentStatus">
+  Current agent status. One of `'idle'` | `'running'` | `'completed'` | `'error'` | `'stopped'`.
+</ResponseField>
+
+<ResponseField name="history" type="HistoricalEvent[]">
+  Persistent event log that forms the agent's memory across steps. Reset to `[]` at the start of each `execute()` call. Contains `step`, `observation`, `user_takeover`, `retry`, and `error` events.
+</ResponseField>
+
+<ResponseField name="lastResult" type="ExecutionResult | null">
+  Result of the most recent completed run. `null` before the first run finishes.
+
+  <Expandable title="ExecutionResult fields">
+    <ResponseField name="success" type="boolean">
+      Whether the agent reported success in its `done` action.
+    </ResponseField>
+    <ResponseField name="data" type="string">
+      The agent's final text response, or an error message on failure.
+    </ResponseField>
+    <ResponseField name="history" type="HistoricalEvent[]">
+      Snapshot of the history array at the time the task ended.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="disposed" type="boolean">
+  `true` after `dispose()` has been called. A disposed agent cannot execute tasks.
+</ResponseField>
+
+<ResponseField name="id" type="string">
+  Unique identifier for this agent instance, generated at construction time.
+</ResponseField>
+
+<ResponseField name="pageController" type="PageController">
+  The underlying [`PageController`](/api/page-controller) instance used for all DOM operations.
+</ResponseField>
+
+<ResponseField name="tools" type="Map<string, PageAgentTool>">
+  Live map of all registered tools. You can read from it at any time; avoid mutating it directly — use `customTools` in the constructor config instead.
+</ResponseField>
+
+<ResponseField name="onAskUser" type="(question: string, options?: { signal: AbortSignal }) => Promise<string>">
+  Set by the Panel automatically to wire the `ask_user` tool into the panel's input field. You can override this if you want to handle user questions differently (e.g. with a custom modal). The implementation must reject the promise when `options.signal` is aborted.
+</ResponseField>
+
+---
+
+## Methods
+
+### `execute(task)`
+
+```typescript
+agent.execute(task: string): Promise<ExecutionResult>
+```
+
+Runs a natural-language task through the full Re-Act agent loop. Returns an `ExecutionResult` when the agent calls `done`, exceeds `maxSteps`, or encounters a fatal error. **Throws** (rather than returning a failed result) when:
+
+- The agent has been disposed.
+- A task is already running.
+- `task` is an empty string.
+
+<ParamField body="task" type="string" required>
+  Natural-language description of what the agent should accomplish on the current page.
+</ParamField>
+
+### `stop()`
+
+```typescript
+agent.stop(): Promise<void>
+```
+
+Aborts the currently running task and waits until the run has fully settled, including all lifecycle hooks. Resolves immediately if the agent is not running.
+
+<Warning>
+  Never `await agent.stop()` inside a lifecycle hook (`onBeforeStep`, `onAfterStep`, etc.) — this will deadlock because `stop()` waits for the very hook you are inside.
+</Warning>
+
+### `dispose()`
+
+```typescript
+agent.dispose(): void
+```
+
+Stops any running task, disposes the `PageController` and `Panel`, and emits a `'dispose'` event. A disposed instance cannot be reused — create a new `PageAgent` instead.
+
+### `pushObservation(content)`
+
+```typescript
+agent.pushObservation(content: string): void
+```
+
+Queues a persistent observation message. It will be injected into the agent's `<agent_history>` context at the start of the next step, making it visible to the LLM's reasoning.
+
+<ParamField body="content" type="string" required>
+  Observation text to persist in agent memory.
+</ParamField>
+
+---
+
+## Events
+
+`PageAgent` extends `EventTarget`. Use `agent.addEventListener(type, handler)` to subscribe.
+
+| Event | Type | Description |
+|---|---|---|
+| `statuschange` | `Event` | Fired when `status` transitions (e.g. `idle` → `running`). |
+| `historychange` | `Event` | Fired whenever `history` is mutated. |
+| `activity` | `CustomEvent<AgentActivity>` | Transient real-time feedback for UI rendering. NOT persisted in history. |
+| `dispose` | `Event` | Fired once when `dispose()` is called. |
+
+### `AgentActivity` detail shapes
+
+| `type` | Extra fields | When fired |
+|---|---|---|
+| `'thinking'` | — | LLM is being invoked. |
+| `'executing'` | `tool: string`, `input: unknown` | A tool call has started. |
+| `'executed'` | `tool: string`, `input: unknown`, `output: string`, `duration: number` | A tool call completed. |
+| `'retrying'` | `attempt: number`, `maxAttempts: number` | LLM call is being retried. |
+| `'error'` | `message: string` | A non-fatal error occurred. |
+
+---
+
+## Example
+
+```typescript
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: 'gpt-4o-mini',
+  language: 'en-US',
+  maxSteps: 20,
+  instructions: {
+    system: 'Always prefer keyboard navigation over mouse clicks when possible.',
+    getPageInstructions: (url) => {
+      if (url.includes('/checkout')) return 'Never submit payment forms.'
+    },
+  },
+  onAfterTask: (agent, result) => {
+    console.log('Task finished:', result.success, result.data)
+  },
+})
+
+// React to real-time activity
+agent.addEventListener('activity', (e) => {
+  const activity = (e as CustomEvent).detail
+  if (activity.type === 'thinking') console.log('Agent is thinking...')
+  if (activity.type === 'executing') console.log('Calling tool:', activity.tool)
+})
+
+// React to status transitions
+agent.addEventListener('statuschange', () => {
+  console.log('New status:', agent.status)
+})
+
+// Run a task
+const result = await agent.execute('Fill in the contact form with dummy data and submit it')
+console.log(result.success, result.data)
+
+// Stop early if needed
+setTimeout(() => agent.stop(), 30_000)
+```
+
+<Tip>
+  The built-in panel wires `onAskUser` automatically. If you disable the panel or override `onAskUser`, make sure your implementation rejects with an `AbortError` when the provided `signal` aborts, otherwise the agent loop cannot be stopped cleanly.
+</Tip>
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PageAgentCore" icon="cpu" href="/api/page-agent-core">
+    Headless base class for building custom agent UIs without the built-in panel.
+  </Card>
+  <Card title="PageController" icon="mouse-pointer" href="/api/page-controller">
+    DOM extraction and browser interaction layer used internally by PageAgent.
+  </Card>
+</CardGroup>

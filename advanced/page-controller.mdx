@@ -1,0 +1,200 @@
+---
+title: "PageController: DOM Operations and Element Interaction"
+sidebarTitle: "PageController"
+description: "PageController manages DOM extraction, interactive element indexing, and action execution — independently of the LLM layer — for reliable web automation."
+---
+
+`PageController` lives in `@page-agent/page-controller` and is the bridge between the LLM agent and the live DOM. It handles everything below the reasoning layer: traversing the DOM tree, producing a simplified HTML representation that the LLM can parse, dispatching clicks and text input, managing scroll state, and rendering the visual interaction mask. Importantly, `PageController` is **completely independent of the LLM** — you can instantiate and call it directly for testing, debugging, or building non-LLM automation.
+
+## Instantiation
+
+<Tabs>
+  <Tab title="Via PageAgent (simplest)">
+    `PageAgent` accepts `PageController` options directly in its config and creates the controller internally:
+
+    ```typescript
+    import { PageAgent } from 'page-agent'
+
+    const agent = new PageAgent({
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'your-api-key',
+      model: 'gpt-5.2',
+
+      // PageController options passed through
+      enableMask: true,
+      viewportExpansion: 0,
+    })
+    ```
+  </Tab>
+  <Tab title="Via PageAgentCore (explicit)">
+    When using `PageAgentCore` you pass an explicit `PageController` instance:
+
+    ```typescript
+    import { PageAgentCore } from '@page-agent/core'
+    import { PageController } from '@page-agent/page-controller'
+
+    const pageController = new PageController({
+      enableMask: true,
+      viewportExpansion: -1, // extract full page, not just viewport
+    })
+
+    const agent = new PageAgentCore({
+      pageController,
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'your-api-key',
+      model: 'gpt-5.2',
+    })
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Configuration Reference
+
+### `PageControllerConfig`
+
+<ParamField path="enableMask" type="boolean" default="false">
+  Show a visual overlay (`SimulatorMask`) that blocks user interaction with the page while the agent is running. Defaults to `true` when `PageController` is created by `PageAgent`.
+</ParamField>
+
+<ParamField path="viewportExpansion" type="number" default="0">
+  Extra pixels beyond the visible viewport to include in DOM extraction. Set to `-1` to extract the entire page regardless of scroll position.
+</ParamField>
+
+<ParamField path="interactiveBlacklist" type="(Element | (() => Element))[]">
+  Elements to exclude from the interactive element index. Supports direct element references or lazy factory functions (evaluated each DOM refresh). Useful for excluding the agent panel itself or navigation menus that should not be automated.
+</ParamField>
+
+<ParamField path="interactiveWhitelist" type="(Element | (() => Element))[]">
+  Elements to force-include in the interactive index even if the extractor would normally skip them. Supports element references or factory functions.
+</ParamField>
+
+<ParamField path="includeAttributes" type="string[]">
+  Additional HTML attributes to preserve in the simplified output. Supports wildcard patterns (`data-*` matches all `data-` prefixed attributes). Common accessibility attributes like `role`, `aria-label`, and `aria-expanded` are included by default.
+</ParamField>
+
+<ParamField path="keepSemanticTags" type="boolean" default="false">
+  Preserve landmark tags (`nav`, `main`, `header`, `footer`, `aside`) in the dehydrated output even when they contain no interactive children. Helps the LLM understand page structure at a higher level.
+</ParamField>
+
+---
+
+## Methods
+
+### State Queries
+
+| Method | Returns | Description |
+|---|---|---|
+| `getBrowserState()` | `Promise<BrowserState>` | Refresh the DOM tree and return a structured `BrowserState` object ready for inclusion in an LLM prompt. This is the primary method called at the start of every agent step. |
+| `updateTree()` | `Promise<string>` | Refresh the DOM tree and return the simplified HTML string. Usually you don't need to call this manually — `getBrowserState()` calls it automatically. |
+| `getCurrentUrl()` | `Promise<string>` | Return `window.location.href`. |
+
+### Element Actions
+
+All element actions use the numeric index from the `[N]` markers in the simplified HTML content string.
+
+| Method | Returns | Description |
+|---|---|---|
+| `clickElement(index)` | `Promise<ActionResult>` | Click the element at the given index. Detects `_blank` link targets and reports them in the result message. |
+| `inputText(index, text)` | `Promise<ActionResult>` | Clear and type `text` into the form element at `index`. Fires synthetic `input` and `change` events for React and other frameworks. |
+| `selectOption(index, optionText)` | `Promise<ActionResult>` | Select the dropdown option matching `optionText` in the `<select>` at `index`. |
+| `scroll(options)` | `Promise<ActionResult>` | Scroll the page or a specific element vertically. Pass `{ down: true, numPages: 1 }` or use `pixels` for a precise amount. Supply `index` to scroll a scrollable sub-element. |
+| `scrollHorizontally(options)` | `Promise<ActionResult>` | Scroll horizontally. Supply `right`, `pixels`, and optionally `index`. |
+| `executeJavascript(script, signal?)` | `Promise<ActionResult>` | Execute a JavaScript string on the page. Wraps the script in an async function and exposes the `AbortSignal` as `signal`. Only available when `experimentalScriptExecutionTool` is enabled on the agent. |
+
+### Mask Control
+
+| Method | Returns | Description |
+|---|---|---|
+| `showMask()` | `Promise<void>` | Show the `SimulatorMask` overlay. Requires `enableMask: true` at construction time. |
+| `hideMask()` | `Promise<void>` | Hide the `SimulatorMask` overlay. |
+
+### Lifecycle
+
+| Method | Returns | Description |
+|---|---|---|
+| `dispose()` | `void` | Remove all DOM highlights, destroy the mask, and clear the internal element index. Called automatically when the parent agent is disposed. |
+
+---
+
+## Type Definitions
+
+### BrowserState
+
+`getBrowserState()` returns this structure, which is assembled directly into the LLM user prompt each step:
+
+```typescript
+interface BrowserState {
+  url: string
+  title: string
+  /** Page info line + scroll position hint, e.g. "[Start of page]" */
+  header: string
+  /** Simplified HTML of interactive elements with [N] index markers */
+  content: string
+  /** Scroll hint below viewport, e.g. "... 300 pixels below ..." or "[End of page]" */
+  footer: string
+}
+```
+
+The `content` field looks roughly like this:
+
+```html
+[1]<button>Submit</button>
+[2]<input type="text" placeholder="Search..."/>
+[3]<a href="/about">About</a>
+```
+
+The LLM uses these `[N]` indices when calling `click_element_by_index` or `input_text`.
+
+### ActionResult
+
+```typescript
+interface ActionResult {
+  success: boolean
+  message: string
+}
+```
+
+---
+
+## Framework Patches
+
+<Note>
+  These patches are applied automatically in the `PageController` constructor — no action is needed on your part.
+</Note>
+
+**React synthetic events** — `PageController` patches React's internal event dispatcher so that programmatic `input` and `click` events correctly trigger React's `onChange` and `onClick` handlers, making form interactions work reliably in React apps.
+
+**Ant Design components** — A similar patch handles Ant Design's custom Select, DatePicker, and other components that intercept native DOM events differently from standard React.
+
+---
+
+## Custom PageController
+
+For server-side or cross-browser scenarios (Puppeteer, Playwright, etc.) you can implement the `PageController` interface instead of using the browser implementation:
+
+```typescript
+import { PageAgentCore } from '@page-agent/core'
+import type { PageController } from '@page-agent/page-controller'
+
+class PuppeteerPageController implements PageController {
+  async getBrowserState() {
+    // Return BrowserState built from Puppeteer APIs
+  }
+  async clickElement(index: number) { /* ... */ }
+  async inputText(index: number, text: string) { /* ... */ }
+  async scroll(options: { down: boolean; numPages: number }) { /* ... */ }
+  async showMask() {}
+  async hideMask() {}
+  dispose() {}
+  // ... other required methods
+}
+
+const agent = new PageAgentCore({
+  pageController: new PuppeteerPageController(),
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: 'your-api-key',
+  model: 'gpt-5.2',
+})
+```

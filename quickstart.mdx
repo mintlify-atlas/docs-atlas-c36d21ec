@@ -1,47 +1,226 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Page Agent in Minutes"
+sidebarTitle: "Quickstart"
+description: "Install Page Agent via CDN or npm, configure your LLM, and execute your first natural-language browser action in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+Page Agent can be added to any webpage in a single script tag or a one-line npm install. This guide walks you through both integration paths, explains every configuration field, and shows you how to listen to agent events and safely handle API credentials in production.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+<Step title="Choose an integration path">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+Pick the approach that matches your project setup:
 
-    ```bash
-    your-cli start
+<Tabs>
+  <Tab title="CDN (Quick Try)">
+    The CDN bundle includes a pre-configured demo LLM, so you can evaluate Page Agent without an API key. Just drop one `<script>` tag into your HTML:
+
+    ```html title="index.html"
+    <script src="https://cdn.jsdelivr.net/npm/page-agent@1.11.0/dist/iife/page-agent.demo.js" crossorigin="true"></script>
     ```
-  </Step>
+
+    Two mirrors are available:
+
+    | Mirror | URL |
+    |--------|-----|
+    | **Global** (jsDelivr) | `https://cdn.jsdelivr.net/npm/page-agent@1.11.0/dist/iife/page-agent.demo.js` |
+    | **China** (npmmirror) | `https://registry.npmmirror.com/page-agent/1.11.0/files/dist/iife/page-agent.demo.js` |
+
+    By default the script auto-initialises a demo agent when it loads. Add `?autoInit=false` to the URL to suppress auto-init; you can then create your own instance with `new window.PageAgent(...)`.
+
+    <Warning>
+      The demo CDN bundle uses a free testing LLM API provided by the Page Agent team. It is **for technical evaluation only** and subject to usage limits. By using it, you agree to the [Terms of Use](https://github.com/alibaba/page-agent/blob/main/docs/terms-and-privacy.md#2-testing-api-and-demo-disclaimer--terms-of-use). Do not use it in production.
+    </Warning>
+  </Tab>
+  <Tab title="npm / yarn / pnpm">
+    Install the package from the npm registry:
+
+    <CodeGroup>
+      ```bash npm
+      npm install page-agent
+      ```
+      ```bash yarn
+      yarn add page-agent
+      ```
+      ```bash pnpm
+      pnpm add page-agent
+      ```
+    </CodeGroup>
+
+    Then import the class in your application code:
+
+    ```typescript
+    import { PageAgent } from 'page-agent'
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Create an agent instance">
+
+Construct a `PageAgent` with your LLM credentials and preferred language. The agent attaches itself to the current page automatically:
+
+```typescript title="agent.ts"
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  model: 'qwen3.5-plus',
+  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  apiKey: 'YOUR_API_KEY',
+  language: 'en-US',
+})
+```
+
+### Configuration fields
+
+<ParamField body="model" type="string" required>
+  The model name as expected by your LLM provider — e.g. `"qwen3.5-plus"`, `"gpt-4o"`, `"llama3.2"`. Must support structured tool/function calling.
+</ParamField>
+
+<ParamField body="baseURL" type="string" required>
+  Base URL of the OpenAI-compatible API endpoint. Examples:
+  - Alibaba DashScope: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+  - OpenAI: `https://api.openai.com/v1`
+  - Local Ollama: `http://localhost:11434/v1`
+</ParamField>
+
+<ParamField body="apiKey" type="string">
+  API key for your LLM provider. Required for cloud providers; can be any non-empty string for local models (Ollama, LM Studio) that don't check the key.
+</ParamField>
+
+<ParamField body="language" type='"en-US" | "zh-CN"' default='"en-US"'>
+  UI and system-prompt language. Controls the language the built-in panel and agent responses use.
+</ParamField>
+
+<ParamField body="maxSteps" type="number" default="40">
+  Maximum number of Re-Act loop iterations per task. Increase for very long multi-step workflows; lower to cap LLM spend.
+</ParamField>
+
+<ParamField body="stepDelay" type="number" default="0.4">
+  Seconds to wait between steps. Increase this if pages need extra time to settle after an action.
+</ParamField>
+
+<ParamField body="instructions.system" type="string">
+  Global system-level instructions injected into every LLM prompt. Use this to describe your application, restrict agent scope, or define domain terminology.
+</ParamField>
+
+</Step>
+
+<Step title="Execute a task">
+
+Call `agent.execute()` with a natural-language task string. It returns a promise that resolves with an `ExecutionResult` when the agent calls `done`:
+
+```typescript title="agent.ts"
+const result = await agent.execute('Click the login button')
+
+console.log(result.success) // true | false
+console.log(result.data)    // agent's final summary text
+```
+
+You can also show the built-in floating panel and let the user type instructions directly:
+
+```typescript
+agent.panel.show()
+```
+
+</Step>
+
+<Step title="Listen to agent events">
+
+`PageAgent` extends `EventTarget`. Subscribe to events for real-time UI feedback and debugging:
+
+```typescript title="agent-events.ts"
+// Status transitions: 'idle' → 'running' → 'completed' | 'error' | 'stopped'
+agent.addEventListener('statuschange', () => {
+  console.log('Agent status:', agent.status)
+})
+
+// Transient activity events — ideal for driving a live status indicator
+agent.addEventListener('activity', (e: Event) => {
+  const activity = (e as CustomEvent).detail
+  // activity.type: 'thinking' | 'executing' | 'executed' | 'retrying' | 'error'
+  if (activity.type === 'executing') {
+    console.log(`Executing tool: ${activity.tool}`, activity.input)
+  }
+})
+
+// History events — persistent, forms the agent's memory
+agent.addEventListener('historychange', () => {
+  console.log('History updated:', agent.history)
+})
+```
+
+Event types at a glance:
+
+| Event | When it fires | Payload |
+|-------|---------------|---------|
+| `statuschange` | Agent status transitions | `agent.status` |
+| `activity` | Real-time step activity (transient) | `AgentActivity` on `e.detail` |
+| `historychange` | History array mutated | `agent.history` |
+| `dispose` | Agent is cleaned up | — |
+
+</Step>
+
+<Step title="Stop or dispose the agent">
+
+Use `stop()` to cancel a running task gracefully. Use `dispose()` when you are done with the agent instance entirely (e.g. on component unmount):
+
+```typescript title="agent-lifecycle.ts"
+// Cancel the current task and wait for it to fully settle
+await agent.stop()
+console.log('Agent stopped. Status:', agent.status) // 'stopped'
+
+// Tear down the agent and its DOM overlay
+agent.dispose()
+// After dispose(), calling execute() will throw.
+```
+
+<Note>
+  Never `await agent.stop()` inside a lifecycle hook (`onBeforeStep`, `onAfterStep`, etc.) — that would cause a deadlock. Call `stop()` from outside the agent's own execution context.
+</Note>
+
+</Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Production: Securing Your API Key
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Passing `apiKey` directly in frontend code means the key is visible in your JavaScript bundle and network requests. For any production deployment, proxy the LLM call through your own backend and use `customFetch` to intercept requests:
+
+<Warning>
+  **Never expose a real LLM API key in client-side code.** Anyone who opens DevTools can read it, copy it, and run up charges on your account.
+</Warning>
+
+```typescript title="secure-agent.ts"
+import { PageAgent } from 'page-agent'
+
+const agent = new PageAgent({
+  model: 'gpt-4o',
+  baseURL: '/api/llm-proxy', // your backend endpoint
+  apiKey: 'not-used',        // placeholder — your proxy validates the session
+  language: 'en-US',
+
+  // Intercept every LLM fetch and attach a session token instead
+  customFetch: async (url, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set('X-Session-Token', getSessionToken()) // your auth mechanism
+    headers.delete('Authorization')                   // remove the placeholder key
+    return fetch(url, { ...init, headers })
+  },
+})
+```
+
+Your backend proxy receives the session token, validates the user, appends the real API key, and forwards the request to the LLM provider. This pattern keeps credentials server-side at all times.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Supported Models" icon="microchip" href="https://alibaba.github.io/page-agent/docs/features/models">
+    Browse tested LLMs, including the free evaluation API and local model options.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting">
+    Diagnose and fix the most common setup and runtime issues.
+  </Card>
+</CardGroup>
