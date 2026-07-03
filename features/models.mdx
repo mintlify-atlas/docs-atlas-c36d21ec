@@ -1,7 +1,7 @@
 ---
-title: "Supported LLM Models and Configuration"
+title: "Supported LLM Models, Providers, and Configuration"
 sidebarTitle: "Models"
-description: "Page Agent works with any OpenAI-compatible model that supports tool calls. Learn which models are tested, how to configure them, and how to enable prompt caching."
+description: "Page Agent supports any OpenAI-compatible model with tool calls. Explore tested models, provider configuration options, and prompt caching setup."
 ---
 
 Page Agent supports any model that implements the OpenAI API specification and provides tool call support — including public cloud providers, local runtimes, and self-hosted proxies. The list below covers models that have been explicitly tested; any OpenAI-compatible endpoint that supports `tool_choice` should work.
@@ -68,6 +68,8 @@ Models marked with ⭐ are the **recommended baseline** models: fast and lightwe
   <Tab title="Others">
     | Provider | Model | Baseline |
     |---|---|---|
+    | MiniMax | `MiniMax-M2.7` | |
+    | MiniMax | `MiniMax-M2.5` | |
     | xAI | `grok-4.3` | |
     | xAI | `grok-build-0.1` | |
     | MoonshotAI | `kimi-k2.7-code` | |
@@ -77,8 +79,6 @@ Models marked with ⭐ are the **recommended baseline** models: fast and lightwe
     | Z.AI | `glm-5.1` | |
     | Z.AI | `glm-5` | |
     | Z.AI | `glm-4.7` | |
-    | MiniMax | `MiniMax-M2.7` | |
-    | MiniMax | `MiniMax-M2.5` | |
   </Tab>
 </Tabs>
 

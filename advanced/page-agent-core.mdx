@@ -185,10 +185,11 @@ console.log(result.success, result.data)
 | `status` | `'idle' \| 'running' \| 'completed' \| 'error' \| 'stopped'` | Current agent execution status. |
 | `history` | `HistoricalEvent[]` | Persistent history array that forms the agent's multi-step memory. |
 | `task` | `string` | The task string passed to the current (or most recent) `execute()` call. |
+| `taskId` | `string` | Unique identifier for the current (or most recent) task execution. Reset on each `execute()` call. |
 | `lastResult` | `ExecutionResult \| null` | Result of the most recent run, or `null` before the first run completes. |
 | `disposed` | `boolean` | `true` after `dispose()` has been called. |
 | `id` | `string` | Unique identifier for this agent instance. |
-| `config` | `PageAgentCoreConfig` | The resolved configuration object. |
+| `config` | `PageAgentCoreConfig & { maxSteps: number }` | The resolved configuration object, with `maxSteps` filled in from the default. |
 | `tools` | `Map<string, PageAgentTool>` | Live map of available tools (may be modified by `customTools`). |
 | `pageController` | `PageController` | The bound `PageController` instance. |
 | `onAskUser` | `(question: string, options?: { signal: AbortSignal }) => Promise<string>` | Assign this callback to enable the `ask_user` tool. The promise should reject when `options.signal` aborts. |
@@ -202,7 +203,7 @@ console.log(result.success, result.data)
 | `execute(task)` | `Promise<ExecutionResult>` | Start a task. Throws if a task is already running — concurrent execution is not supported. |
 | `stop()` | `Promise<void>` | Gracefully stop the running task and wait for the loop to settle. The agent remains reusable afterwards. |
 | `dispose()` | `void` | Permanently destroy the agent and clean up all resources including the `PageController`. |
-| `pushObservation(content)` | `void` | Inject an observation string into history before the next step. Useful for testing or external monitoring hooks. |
+| `pushObservation(content)` | `void` | Inject an observation string into history before the next step. Useful for testing or external monitoring hooks. Marked `@experimental` in source; the API may change. |
 
 ---
 

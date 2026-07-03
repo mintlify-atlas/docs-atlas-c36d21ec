@@ -22,6 +22,10 @@ These fields are inherited from `LLMConfig` and control how the agent communicat
   API key for the LLM provider. Omit for local runtimes (Ollama, LM Studio) or when authentication is handled by `customFetch`.
 </ParamField>
 
+<ParamField path="temperature" type="number" deprecated>
+  Sampling temperature. **Deprecated** — many models reject this parameter outright. Use `transformRequestBody` to set it only for models you have verified accept it.
+</ParamField>
+
 <ParamField path="maxRetries" type="number">
   Number of times the agent will retry a failed LLM call before propagating an error. Defaults to `3`.
 </ParamField>
@@ -162,7 +166,7 @@ These fields are inherited from `LLMConfig` and control how the agent communicat
 </ParamField>
 
 <ParamField path="onDispose" type="(agent: PageAgentCore, reason?: string) => void">
-  Called when the agent instance is disposed. Receives an optional reason string. If the hook is async, disposal will wait for it to settle.
+  Called when the agent instance is disposed. Receives an optional reason string.
 </ParamField>
 
 ## Full TypeScript Interface
@@ -177,6 +181,8 @@ export interface AgentConfig extends LLMConfig {
   baseURL: string
   model: string
   apiKey?: string
+  /** @deprecated Use transformRequestBody instead */
+  temperature?: number
   maxRetries?: number
   disableNamedToolChoice?: boolean
   transformRequestBody?: (

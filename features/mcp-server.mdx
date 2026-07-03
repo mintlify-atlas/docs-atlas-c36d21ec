@@ -1,7 +1,7 @@
 ---
 title: "Control Your Browser via MCP from AI Agent Clients"
 sidebarTitle: "MCP Server"
-description: "Run @page-agent/mcp to connect Claude Desktop, Cursor, Copilot, and other MCP clients to your browser through the Page Agent extension via a local WebSocket bridge."
+description: "Run @page-agent/mcp to connect Claude Desktop, Cursor, or Copilot to your browser through the Page Agent extension using a local WebSocket bridge."
 ---
 
 `@page-agent/mcp` is a Node.js MCP (Model Context Protocol) server that bridges AI agent clients — such as Claude Desktop, GitHub Copilot, or Cursor — to your browser through the Page Agent extension. Once connected, your agent client can issue natural-language browser tasks and receive structured results without any additional coding.
@@ -25,12 +25,13 @@ Before starting, make sure you have:
 │ Claude /     │◄────────►│ @page-agent/mcp  │◄────────────►│ Hub tab      │
 │ Copilot      │  (MCP)   │ (Node.js)        │  (localhost) │ (extension)  │
 └──────────────┘          └──────────────────┘              └──────┬───────┘
-                                                                    │
-                                                                    ▼
-                                                            ┌──────────────┐
-                                                            │ MultiPage    │
-                                                            │ Agent        │
-                                                            └──────────────┘
+                                   │                               │
+                                   │ HTTP                          │ useAgent
+                                   ▼                               ▼
+                          ┌──────────────────┐              ┌──────────────┐
+                          │ Launcher page    │              │ MultiPage    │
+                          │ (localhost:PORT) │              │ Agent        │
+                          └──────────────────┘              └──────────────┘
 ```
 
 The MCP server communicates with the agent client over **stdio** using the standard MCP protocol. It simultaneously runs an HTTP + WebSocket server on `localhost` that the Page Agent extension's hub tab connects to. Tasks flow: agent client → MCP server → WebSocket → hub tab → MultiPage Agent → browser.
@@ -42,10 +43,10 @@ The MCP server communicates with the agent client over **stdio** using the stand
     The client runs `npx @page-agent/mcp` via stdio when it needs to call a browser tool.
   </Step>
   <Step title="MCP server starts HTTP + WebSocket and opens the launcher">
-    The server binds to `localhost:PORT` (default `38401`) and opens a launcher page in your default browser.
+    The server binds to `localhost:PORT` (default `38401`) and opens a launcher page (`localhost:PORT`) in your default browser.
   </Step>
-  <Step title="Extension opens a hub tab">
-    The launcher page asks the Page Agent extension to open a hub tab (`hub.html?ws=PORT`). You will see a connection approval prompt in the browser.
+  <Step title="Launcher page triggers the extension to open a hub tab">
+    The launcher page detects the Page Agent extension and asks it to open a hub tab (`hub.html?ws=PORT`). You will see a connection approval prompt in the browser.
   </Step>
   <Step title="Hub connects and tasks flow">
     The hub tab establishes a WebSocket connection back to the MCP server. MCP tool calls are now proxied to the hub, which runs the MultiPage Agent in the browser.

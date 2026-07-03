@@ -1,5 +1,5 @@
 ---
-title: "Extend Page Agent with Custom Tools"
+title: "Extend Page Agent with Custom Tools and Tool Overrides"
 sidebarTitle: "Custom Tools"
 description: "Register Zod-typed custom tools to give Page Agent access to your business APIs, override built-in tools, or remove tools the agent should never use."
 ---
@@ -131,13 +131,13 @@ These tools are available by default. Override or remove them via `customTools`.
 | Tool | Description |
 |---|---|
 | `done` | Mark the task as complete and return a result to the caller. |
-| `wait` | Pause execution for a specified duration. |
-| `ask_user` | Ask the user a question and wait for their typed reply. |
-| `click_element_by_index` | Click a DOM element identified by its index in the simplified page tree. |
-| `input_text` | Type text into a focused input or textarea element. |
-| `select_dropdown_option` | Choose an option in a `<select>` element. |
-| `scroll` | Scroll the page or a scrollable container vertically. |
-| `scroll_horizontally` | Scroll the page or a container horizontally. |
+| `wait` | Wait for 1–10 seconds. Useful to let the page or data fully load before the next step. |
+| `ask_user` | Ask the user a question and wait for their typed reply. Automatically removed from the tool list if `onAskUser` is not configured. |
+| `click_element_by_index` | Click an element by its index in the simplified interactive element tree. |
+| `input_text` | Click and type text into an interactive input element. |
+| `select_dropdown_option` | Select a dropdown option by the text of the option. Requires both element `index` and option `text`. |
+| `scroll` | Scroll vertically. Without `index`: scrolls the document. With `index`: scrolls the container at that index (or its nearest scrollable ancestor). |
+| `scroll_horizontally` | Scroll the page or a container horizontally. Requires `pixels` (number of pixels; `right` direction defaults to `true`). |
 | `execute_javascript` | Execute a JavaScript snippet on the page. **Experimental — disabled by default.** |
 
 ### The `execute_javascript` Tool

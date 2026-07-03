@@ -89,6 +89,7 @@ description: "PageController manages DOM extraction, interactive element indexin
 | `getBrowserState()` | `Promise<BrowserState>` | Refresh the DOM tree and return a structured `BrowserState` object ready for inclusion in an LLM prompt. This is the primary method called at the start of every agent step. |
 | `updateTree()` | `Promise<string>` | Refresh the DOM tree and return the simplified HTML string. Usually you don't need to call this manually — `getBrowserState()` calls it automatically. |
 | `getCurrentUrl()` | `Promise<string>` | Return `window.location.href`. |
+| `getLastUpdateTime()` | `Promise<number>` | Return the timestamp (milliseconds since epoch) of the last `updateTree()` call. |
 
 ### Element Actions
 
@@ -102,6 +103,12 @@ All element actions use the numeric index from the `[N]` markers in the simplifi
 | `scroll(options)` | `Promise<ActionResult>` | Scroll the page or a specific element vertically. Pass `{ down: true, numPages: 1 }` or use `pixels` for a precise amount. Supply `index` to scroll a scrollable sub-element. |
 | `scrollHorizontally(options)` | `Promise<ActionResult>` | Scroll horizontally. Supply `right`, `pixels`, and optionally `index`. |
 | `executeJavascript(script, signal?)` | `Promise<ActionResult>` | Execute a JavaScript string on the page. Wraps the script in an async function and exposes the `AbortSignal` as `signal`. Only available when `experimentalScriptExecutionTool` is enabled on the agent. |
+
+### Highlight Control
+
+| Method | Returns | Description |
+|---|---|---|
+| `cleanUpHighlights()` | `Promise<void>` | Remove all element highlight overlays from the DOM. Called automatically at the end of each `execute()` run. |
 
 ### Mask Control
 

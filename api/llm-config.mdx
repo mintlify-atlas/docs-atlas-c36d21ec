@@ -32,6 +32,10 @@ description: "All LLMConfig fields for connecting Page Agent to any OpenAI-compa
   API key for the LLM provider. Omit for local runtimes (Ollama, LM Studio) that do not require authentication, or when authentication is handled via `customFetch`.
 </ParamField>
 
+<ParamField path="temperature" type="number" deprecated>
+  Sampling temperature. **Deprecated** — many models reject this parameter outright. Use `transformRequestBody` to set it only for models you have verified accept it.
+</ParamField>
+
 <ParamField path="maxRetries" type="number" default="3">
   Number of times the client will retry a failed LLM call before propagating the error. Applies to transient network errors and non-2xx responses.
 </ParamField>
@@ -156,6 +160,12 @@ export interface LLMConfig {
 
   /** API key; omit for local runtimes or when using customFetch */
   apiKey?: string
+
+  /**
+   * @deprecated No longer a standard parameter; many models reject it outright.
+   * Use `transformRequestBody` to set it only for models you've verified.
+   */
+  temperature?: number
 
   /** Retry count on LLM call failure. Default: 3 */
   maxRetries?: number

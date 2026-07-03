@@ -198,6 +198,10 @@ type HistoricalEvent =
   | { type: 'error'; message: string }
 ```
 
+<Note>
+  The `step` event's `reflection` field is typed as `Partial<AgentReflection>` — all three sub-fields (`evaluation_previous_goal`, `memory`, `next_goal`) may be `undefined`. Guard for `undefined` when rendering.
+</Note>
+
 ---
 
 ## Using the Built-in Panel Manually

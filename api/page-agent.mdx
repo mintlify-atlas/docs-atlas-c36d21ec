@@ -28,7 +28,7 @@ new PageAgent(config: PageAgentConfig)
 type PageAgentConfig = AgentConfig & PageControllerConfig & Omit<PanelConfig, 'language'>
 ```
 
-Internally the constructor creates a `PageController` (with `enableMask` defaulting to `true`) and a `Panel`, then passes both to `PageAgentCore`. You never need to instantiate those classes yourself when using `PageAgent`.
+Internally the constructor creates a `PageController` (applying `enableMask: true` when `enableMask` is not explicitly set) and a `Panel`, then passes both to `PageAgentCore`. You never need to instantiate those classes yourself when using `PageAgent`.
 
 ### LLM Connection
 
@@ -58,8 +58,8 @@ Internally the constructor creates a `PageController` (with `enableMask` default
   Delay in seconds between consecutive steps. A small pause helps pages stabilise after DOM mutations.
 </ParamField>
 
-<ParamField body="enableMask" type="boolean" default="true">
-  Show a visual overlay that blocks user interaction while the agent is operating. Set to `false` to allow simultaneous user input.
+<ParamField body="enableMask" type="boolean">
+  Show a visual overlay that blocks user interaction while the agent is operating. Set to `false` to allow simultaneous user input. `PageAgent` defaults this to `true` internally when constructing the `PageController`; `PageController` used directly defaults to `false`.
 </ParamField>
 
 <ParamField body="customTools" type="Record<string, PageAgentTool | null>">
@@ -112,8 +112,8 @@ Internally the constructor creates a `PageController` (with `enableMask` default
 
 ### Panel
 
-<ParamField body="promptForNextTask" type="boolean" default="true">
-  When `true`, the panel's task input is shown again after a task completes so users can immediately issue a follow-up task.
+<ParamField body="promptForNextTask" type="boolean">
+  When `true`, the panel's task input is shown again after a task completes so users can immediately issue a follow-up task. Defaults to `true` when not set.
 </ParamField>
 
 ### Lifecycle Hooks

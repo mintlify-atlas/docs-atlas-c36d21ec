@@ -157,17 +157,22 @@ Selects the `<option>` whose visible text matches `text` inside the `<select>` e
 ### `scroll(options)`
 
 ```typescript
-controller.scroll(options: ScrollOptions): Promise<ActionResult>
+controller.scroll(options: {
+  down: boolean
+  numPages: number
+  pixels?: number
+  index?: number
+}): Promise<ActionResult>
 ```
 
 Scrolls vertically. Without `index` it scrolls the page; with `index` it finds the nearest scrollable ancestor of the indexed element.
 
 <ParamField body="options" type="object" required>
   <Expandable title="ScrollOptions fields">
-    <ParamField body="down" type="boolean" default="true">
+    <ParamField body="down" type="boolean" required>
       `true` to scroll down, `false` to scroll up.
     </ParamField>
-    <ParamField body="numPages" type="number" default="0.1">
+    <ParamField body="numPages" type="number" required>
       Fraction of the viewport height to scroll. Ignored when `pixels` is provided.
     </ParamField>
     <ParamField body="pixels" type="number">
@@ -186,14 +191,18 @@ Scrolls vertically. Without `index` it scrolls the page; with `index` it finds t
 ### `scrollHorizontally(options)`
 
 ```typescript
-controller.scrollHorizontally(options: HScrollOptions): Promise<ActionResult>
+controller.scrollHorizontally(options: {
+  right: boolean
+  pixels: number
+  index?: number
+}): Promise<ActionResult>
 ```
 
 Scrolls horizontally. Without `index` it scrolls the page; with `index` it finds the nearest horizontally scrollable ancestor.
 
 <ParamField body="options" type="object" required>
   <Expandable title="HScrollOptions fields">
-    <ParamField body="right" type="boolean" default="true">
+    <ParamField body="right" type="boolean" required>
       `true` to scroll right, `false` to scroll left.
     </ParamField>
     <ParamField body="pixels" type="number" required>

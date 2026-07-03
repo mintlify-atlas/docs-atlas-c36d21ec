@@ -110,13 +110,14 @@ const agent = new PageAgent({
 
 <Step title="Execute a task">
 
-Call `agent.execute()` with a natural-language task string. It returns a promise that resolves with an `ExecutionResult` when the agent calls `done`:
+Call `agent.execute()` with a natural-language task string. It returns a promise that resolves with an `ExecutionResult` when the task finishes — whether the agent calls `done`, hits `maxSteps`, or encounters an unrecoverable error. The promise only rejects for pre-flight failures (e.g. calling `execute()` while already running):
 
 ```typescript title="agent.ts"
 const result = await agent.execute('Click the login button')
 
 console.log(result.success) // true | false
 console.log(result.data)    // agent's final summary text
+console.log(result.history) // full history of every step taken
 ```
 
 You can also show the built-in floating panel and let the user type instructions directly:
@@ -124,6 +125,10 @@ You can also show the built-in floating panel and let the user type instructions
 ```typescript
 agent.panel.show()
 ```
+
+<Warning>
+  `execute()` throws synchronously if the agent has already been disposed, or if a task is already running (status is `'running'`). Always check `agent.status` or `await` and `catch` accordingly before calling `execute()` in concurrent code.
+</Warning>
 
 </Step>
 

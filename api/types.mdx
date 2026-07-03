@@ -140,10 +140,10 @@ A persisted record of something that occurred during a task. Stored in `Executio
 ```typescript
 type HistoricalEvent =
   | AgentStepEvent
-  | { type: 'observation'; content: string }
-  | { type: 'user_takeover' }
-  | { type: 'retry'; message: string; attempt: number; maxAttempts: number }
-  | { type: 'error'; message: string; rawResponse?: unknown }
+  | ObservationEvent
+  | UserTakeoverEvent
+  | RetryEvent
+  | AgentErrorEvent
 ```
 
 <ResponseField name="AgentStepEvent" type="object">

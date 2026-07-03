@@ -131,16 +131,16 @@ In LM Studio, open **Settings → Server** and enable **"Allow Cross-Origin Requ
    })
    ```
 
-2. **Use `onAskUser` for ambiguous situations** — If the agent reaches a decision point it can't resolve from the DOM alone, it needs to ask. Set `onAskUser` so it can pause and get user input rather than spinning:
+2. **Use `onAskUser` for ambiguous situations** — If the agent reaches a decision point it can't resolve from the DOM alone, it needs to ask. Assign `onAskUser` on the agent instance so it can pause and get user input rather than spinning:
 
    ```typescript
-   const agent = new PageAgent({
-     // ...
-     onAskUser: async (question) => {
-       // Could be a custom modal, window.prompt, or a chat interface
-       return window.prompt(question) ?? ''
-     },
-   })
+   const agent = new PageAgent({ /* ... */ })
+
+   // onAskUser is a property on the agent instance, not a constructor option
+   agent.onAskUser = async (question) => {
+     // Could be a custom modal, window.prompt, or a chat interface
+     return window.prompt(question) ?? ''
+   }
    ```
 
 3. **The task is under-specified** — Add context via `instructions.system` to tell the agent about page-specific behaviour:
